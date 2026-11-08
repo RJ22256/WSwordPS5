@@ -31,4 +31,4 @@ export LINK_EXTRA_FLAGS="--wrap=main --wrap=exit --wrap=_exit --wrap=atexit -z n
 bash "$ps5/tools/link-title.sh" "$work" "$vulkan" "$sdk" \
     --whole-archive "$out/libwsword.a" --no-whole-archive \
     "$deps/lib/libavformat.a" "$deps/lib/libavcodec.a" "$deps/lib/libswscale.a" "$deps/lib/libavutil.a" \
-    "$deps/lib/libshaderc_combined.a" "$deps/lib/libz.a"
+    "$deps/lib/libshaderc_combined.a"  # (zlib: RADV's link has PS5_Vulkan's, the same pinned build)
