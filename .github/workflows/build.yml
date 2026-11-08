@@ -101,6 +101,7 @@ jobs:
           sha256sum WSwordPS5-PPSA99777.zip > WSwordPS5-PPSA99777.zip.sha256
           echo "::notice title=Zip::$(du -m WSwordPS5-PPSA99777.zip | cut -f1) MB"
       - uses: actions/upload-artifact@v4
+        continue-on-error: true  # (the account's artifact storage can be full: the release doesn't need it)
         with:
           name: WSwordPS5-PPSA99777
           path: WSwordPS5/WSwordPS5-PPSA99777.zip
