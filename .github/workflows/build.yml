@@ -34,11 +34,16 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq clang-18 lld-18 llvm-18 cmake ninja-build glslang-tools rsync curl zstd \
             python3-numpy python3-pil python3-mako python3-pip bison flex pkg-config zlib1g-dev libzstd-dev \
-            libexpat1-dev libelf-dev libdrm-dev spirv-tools
+            libexpat1-dev libelf-dev libdrm-dev spirv-tools \
+            llvm-18-dev libclang-18-dev libclang-cpp18-dev libllvmspirvlib-18-dev libclc-18-dev libclc-18 \
+            python3-yaml python3-ply libpolly-18-dev
           sudo ln -sf /usr/bin/clang-18 /usr/local/bin/clang
           sudo ln -sf /usr/bin/clang++-18 /usr/local/bin/clang++
           sudo ln -sf /usr/bin/ld.lld-18 /usr/local/bin/ld.lld
-          for t in llvm-ar llvm-objcopy llvm-nm llvm-ranlib llvm-strip; do sudo ln -sf /usr/bin/$t-18 /usr/local/bin/$t; done
+          for t in llvm-ar llvm-objcopy llvm-nm llvm-ranlib llvm-strip llvm-config llvm-spirv; do
+            [[ -e /usr/bin/$t-18 ]] && sudo ln -sf /usr/bin/$t-18 /usr/local/bin/$t
+          done
+          [[ -e /usr/local/bin/llvm-config ]] || sudo ln -sf /usr/lib/llvm-18/bin/llvm-config /usr/local/bin/llvm-config
           pip install --user --break-system-packages "meson>=1.4" packaging pyyaml
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           clang --version | head -1; meson --version
