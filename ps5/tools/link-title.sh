@@ -84,10 +84,12 @@ link_title
 # every other platform (weak references): bound to 0 here, and the title linked again.
 radv_nulls=$(comm -23 \
     <("$sdk/bin/llvm-nm" -D --undefined-only "$work/link/llvm-pie.elf" | awk '$1 == "U" || $1 == "w" { sub(/@.*/, "", $2); print $2 }' |
-        { grep -E '^(radv|vk_common|wsi)_' || true; } | sort -u) \
+        sort -u) \
     <(for library in "$sdk"/target/lib/*.so; do "$sdk/bin/llvm-nm" -D --defined-only "$library" 2>/dev/null | awk '{ print $NF }'; done | sort -u))
 if [[ -n $radv_nulls ]]; then
-    echo "link-title.sh: $(wc -w <<<"$radv_nulls") entry points RADV leaves undefined, bound to null: $(head -c 300 <<<"${radv_nulls//$'\n'/ }")..."
+    echo "link-title.sh: $(wc -w <<<"$radv_nulls") imports no console module exports, bound to null (RADV's and its layers' unimplemented entry points)"
+    others=$(grep -vE '^(radv|sqtt|rra|rmv|metro_exodus|annotate|ctx_roll|vk_common|wsi|anv|tu|lvp|vk_)' <<<"$radv_nulls" || true)
+    [[ -z $others ]] || echo "link-title.sh: of them, not driver entry points (calls there would crash): ${others//$'\n'/ }"
     defs=()
     for name in $radv_nulls; do defs+=("--defsym=$name=0"); done
     link_title "${defs[@]}"
