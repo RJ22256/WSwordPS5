@@ -92,7 +92,7 @@ radv_nulls=$(comm -23 \
         "$sdk/bin/llvm-nm" -D --defined-only "$library" 2>/dev/null | awk '{ print $NF }'; done | sort -u))
 if [[ -n $radv_nulls ]]; then
     echo "link-title.sh: $(wc -w <<<"$radv_nulls") imports no console module exports, bound to null (RADV's and its layers' unimplemented entry points)"
-    others=$(grep -vE '^(radv|sqtt|rra|rmv|metro_exodus|annotate|ctx_roll|vk_common|wsi|anv|tu|lvp|vk_)' <<<"$radv_nulls" || true)
+    others=$(grep -vE '^(radv|sqtt|rra|rmv|metro_exodus|annotate|ctx_roll|vk_common|wsi|anv|tu|lvp|vk_|threaded_)' <<<"$radv_nulls" || true)
     [[ -z $others ]] || echo "link-title.sh: of them, not driver entry points (calls there would crash): ${others//$'\n'/ }"
     # hidden absolute symbols at 0, in an object of their own: defined (no import), and not exported (the native
     # tool publishes no application exports)

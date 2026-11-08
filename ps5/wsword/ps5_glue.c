@@ -56,3 +56,22 @@ __attribute__((noreturn)) static void close_title(int status, bool handlers) {
 void __wrap_exit(int status) { close_title(status, true); }
 void __wrap__exit(int status) { close_title(status, false); }
 void catchReturnFromMain(int status) { close_title(status, true); }
+
+// What the title's libc lacks that the runtime's dependencies name (link-title.sh refuses an import no module
+// exports: it would be null): no processes, no terminals; path limits are FreeBSD's.
+#include <errno.h>
+#include <limits.h>
+#include <sys/types.h>
+#include <unistd.h>
+pid_t fork(void) { errno = ENOSYS; return -1; }
+int isatty(int fd) { (void)fd; errno = ENOTTY; return 0; }
+long pathconf(const char *path, int name) {
+    (void)path;
+    switch (name) {
+    case _PC_NAME_MAX: return NAME_MAX;
+    case _PC_PATH_MAX: return PATH_MAX;
+    case _PC_PIPE_BUF: return PIPE_BUF;
+    case _PC_LINK_MAX: return LINK_MAX;
+    default: errno = EINVAL; return -1;
+    }
+}
