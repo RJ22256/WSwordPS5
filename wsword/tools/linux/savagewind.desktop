@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Savage Wind
+Comment=Static recompilation runtime (bring your own game files)
+Exec=savagewind
+Icon=savagewind
+Categories=Game;
+Terminal=false
+Actions=Configuration;
+
+[Desktop Action Configuration]
+Name=Savage Wind Configuration
+Exec=savagewind --config

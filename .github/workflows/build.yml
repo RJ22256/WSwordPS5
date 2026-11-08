@@ -87,12 +87,27 @@ jobs:
       - name: The title
         working-directory: WSwordPS5
         run: |
-          sdk=$(bash ps5/tools/setup-sdk.sh)
-          for so in "$sdk"/target/lib/*.so; do
-            "$sdk/bin/llvm-nm" -D --defined-only "$so" 2>/dev/null | grep -q " radv_EnumeratePhysicalDevices$" && echo "defines radv_EnumeratePhysicalDevices: $so"
-          done
-          LINK_TRACE_SYMBOL=radv_EnumeratePhysicalDevices bash ps5/tools/build.sh
+          bash ps5/tools/build.sh
           ls -la dist/PPSA99777
+      - name: WSword runtime dependencies cache
+        uses: actions/cache@v4
+        with:
+          path: WSwordPS5/build/wsword-deps
+          key: ps5-wsword-deps-${{ hashFiles('WSwordPS5/ps5/wsword/deps.sh') }}
+      - name: WSword runtime dependencies (FFmpeg, shaderc, zlib, headers; long the first time)
+        working-directory: WSwordPS5
+        run: |
+          command -v nasm || sudo apt-get install -y -qq nasm
+          sdk=$(bash ps5/tools/setup-sdk.sh)
+          bash ps5/wsword/deps.sh "$sdk" build/wsword-deps ../PS5_Vulkan/.deps/native/zlib/root
+      - name: WSword runtime (libwsword.a) and what it still needs
+        working-directory: WSwordPS5
+        run: |
+          sdk=$(bash ps5/tools/setup-sdk.sh)
+          python3 ps5/wsword/configure.py --sdk "$sdk" --deps build/wsword-deps --out build/wsword
+          ninja -C build/wsword
+          python3 ps5/wsword/missing.py --sdk "$sdk" build/wsword/libwsword.a build/wsword-deps/lib/*.a \
+            | tee build/wsword/missing.txt >> "$GITHUB_STEP_SUMMARY"
       - name: The zip
         working-directory: WSwordPS5
         run: |

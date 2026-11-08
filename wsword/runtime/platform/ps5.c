@@ -1,0 +1,255 @@
+// PS5 host layer (runtime/platform.h), for the jailbroken console's homebrew titles (WSwordPS5: the PS5 payload SDK,
+// prospero-clang, RADV on the console's GPU). Modelled on linux.c, with the differences the console makes:
+//  - guest memory is direct memory: a title's anonymous mappings are charged to its ~1 GB flexible budget, so the
+//    12.5 GB window is a reserved virtual range (ps5platform/shm.h) committed in 64 KiB units, per region
+//    (plat_commit from the loader / kernel) and, like Windows, on the first touch of anything outside one
+//  - no child processes, no re-exec: the game code is built on the PC (WSword Configuration's PS5 export)
+//  - no terminal: stderr goes to WSword.log in the title folder (/app0, as WSword.log next to WSword.exe)
+#include <SDL3/SDL.h>
+#include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <ftw.h>
+#include <pthread.h>
+#include <sched.h>
+#include <signal.h>
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/ucontext.h>
+#include <time.h>
+#include <unistd.h>
+
+#include <ps5platform/shm.h>
+
+#include "../gamelib.h"
+#include "../platform.h"
+
+// ---- guest address space
+// Which 64 KiB units of the window are backed (ps5_vrange_commit): a fault on one that isn't is a first touch, to
+// back read/write; a fault on one that is was a protection the runtime set (the data watchpoint, runtime/dispatch.c)
+// or a real crash. (ps5_vrange_commit on a backed unit only changes its protection, so it can't tell them apart.)
+#define UNIT 0x10000ull
+static uint64_t g_lo, g_hi;
+static _Atomic uint64_t *g_backed;  // one bit per unit
+
+static bool unit_backed(uint64_t a) {
+    uint64_t u = (a - g_lo) / UNIT;
+    return atomic_load_explicit(&g_backed[u >> 6], memory_order_acquire) >> (u & 63) & 1;
+}
+
+static void mark_backed(uint64_t a, uint64_t e) {
+    for (uint64_t u = (a - g_lo) / UNIT, end = (e - g_lo + UNIT - 1) / UNIT; u < end; u++)
+        atomic_fetch_or_explicit(&g_backed[u >> 6], 1ull << (u & 63), memory_order_release);
+}
+
+static void mark_unbacked(uint64_t a, uint64_t e) {  // (whole units only)
+    for (uint64_t u = (a - g_lo + UNIT - 1) / UNIT, end = (e - g_lo) / UNIT; u < end; u++)
+        atomic_fetch_and_explicit(&g_backed[u >> 6], ~(1ull << (u & 63)), memory_order_release);
+}
+
+static bool in_window(uint64_t a) { return g_backed && a >= g_lo && a < g_hi; }
+
+static bool backing(uint64_t a, uint64_t size, int prot) {
+    int r = ps5_vrange_commit((void *)(uintptr_t)a, size, prot);
+    if (r) {
+        fprintf(stderr, "[plat] guest memory %llx+%llx: no direct memory for it (%x)\n", (unsigned long long)a,
+                (unsigned long long)size, r);
+        return false;
+    }
+    mark_backed(a & ~(UNIT - 1), a + size);
+    return true;
+}
+
+// A first touch outside the committed regions (from the crash handler): the unit read/write, as on Windows.
+static bool lazy_commit(uint64_t fa) {
+    if (!in_window(fa) || unit_backed(fa)) return false;
+    return backing(fa & ~(UNIT - 1), UNIT, PS5_SHM_READ | PS5_SHM_WRITE);
+}
+
+bool plat_reserve_guest(uint64_t lo, uint64_t hi) {
+    if (ps5_vrange_reserve_at((void *)(uintptr_t)lo, hi - lo)) return false;
+    g_backed = calloc((hi - lo) / UNIT / 64 + 1, sizeof *g_backed);
+    if (!g_backed) { ps5_vrange_release((void *)(uintptr_t)lo, hi - lo); return false; }
+    g_lo = lo, g_hi = hi;
+    return true;
+}
+
+long plat_written_pages(uint64_t addr, uint64_t size, uint64_t *pages, size_t max) { return -1; }  // (not tracked)
+int plat_any_written(uint64_t addr, uint64_t size) { return -1; }
+
+// Everything given back: units come back zeroed at their next commit (ps5_vrange_decommit).
+bool plat_reset_guest(uint64_t lo, uint64_t hi) {
+    if (ps5_vrange_decommit((void *)(uintptr_t)lo, hi - lo)) return false;
+    mark_unbacked(lo, hi);
+    return true;
+}
+
+void plat_commit(uint64_t addr, uint64_t size) {
+    if (!size || !in_window(addr)) return;
+    // only the units not yet backed: committing a backed one would reset a protection the runtime set on it
+    uint64_t a = addr & ~(UNIT - 1), e = (addr + size + UNIT - 1) & ~(UNIT - 1);
+    while (a < e) {
+        if (unit_backed(a)) { a += UNIT; continue; }
+        uint64_t run = a;
+        while (run < e && !unit_backed(run)) run += UNIT;
+        backing(a, run - a, PS5_SHM_READ | PS5_SHM_WRITE);
+        a = run;
+    }
+}
+
+void plat_decommit(uint64_t addr, uint64_t size) {
+    if (!in_window(addr)) return;
+    uint64_t a = (addr + UNIT - 1) & ~(UNIT - 1), e = (addr + size) & ~(UNIT - 1);  // (whole units inside the range)
+    if (e > a && ps5_vrange_decommit((void *)(uintptr_t)a, e - a) == 0) mark_unbacked(a, e);
+}
+
+int plat_protect(uint64_t addr, uint64_t size, int prot) {
+    int p = prot == PLAT_PROT_NONE ? 0 : prot == PLAT_PROT_READ ? PS5_SHM_READ : PS5_SHM_READ | PS5_SHM_WRITE;
+    if (in_window(addr)) {  // backed first, whole units read/write (as Windows' commit), then the pages' protection
+        plat_commit(addr, size);
+        return ps5_vrange_commit((void *)(uintptr_t)addr, size, p) ? -1 : 0;
+    }
+    return mprotect((void *)(uintptr_t)addr, size, prot == PLAT_PROT_NONE ? PROT_NONE
+                                                   : prot == PLAT_PROT_READ ? PROT_READ : PROT_READ | PROT_WRITE);
+}
+
+// ---- time
+uint64_t plat_now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
+}
+
+void plat_sleep_until_ns(uint64_t t) {
+    for (;;) {  // (nanosleep: the kernel's own; relative, so measured again after an interruption)
+        uint64_t now = plat_now_ns();
+        if (now >= t) return;
+        uint64_t d = t - now;
+        struct timespec ts = {.tv_sec = (time_t)(d / 1000000000u), .tv_nsec = (long)(d % 1000000000u)};
+        nanosleep(&ts, NULL);
+    }
+}
+
+void plat_cpu_placement(void) {}  // (the console's 8 cores / 16 threads: the scheduler's placement)
+
+void plat_thread_realtime(uint64_t period_ns) {
+    (void)period_ns;
+    struct sched_param sp = {.sched_priority = 1};
+    pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);  // (refused quietly where a title may not)
+}
+
+// ---- process
+static char g_log_path[1024];
+
+static void log_to_title_folder(void) {
+    const char *dir = getenv("SAVAGEWIND_DATA_ROOT");
+    snprintf(g_log_path, sizeof g_log_path, "%s/WSword.log", dir && *dir ? dir : "/app0");
+    char prev[1100];  // (the last run's log stays as WSword.prev.log)
+    snprintf(prev, sizeof prev, "%.*s.prev.log", (int)strlen(g_log_path) - 4, g_log_path);
+    rename(g_log_path, prev);
+    if (!freopen(g_log_path, "w", stderr)) { g_log_path[0] = 0; return; }
+    dup2(STDERR_FILENO, STDOUT_FILENO);
+}
+
+static void require_cpu(void) {  // (the console's Zen 2 runs the x86-64-v3 game code: kept for the message)
+    const char *need = gamelib_cpu_problem();
+    if (!need) return;
+    fprintf(stderr, "FATAL: WSword needs %s.\n", need);
+    exit(1);
+}
+
+void plat_init(void) {
+    log_to_title_folder();
+    require_cpu();
+}
+
+bool plat_exe_path(char *buf, size_t size) {
+    const char *dir = getenv("SAVAGEWIND_DATA_ROOT");
+    snprintf(buf, size, "%s/eboot.bin", dir && *dir ? dir : "/app0");
+    return true;
+}
+
+void plat_exec(char *const argv[]) { (void)argv; }  // (no re-exec on the console: the caller carries on / reports it)
+
+// ---- diagnostics
+const char *plat_symbol(uint64_t pc, uint64_t *offset) {
+    Dl_info di = {0};
+    if (!dladdr((void *)(uintptr_t)pc, &di) || !di.dli_sname) return NULL;
+    if (offset) *offset = pc - (uint64_t)(uintptr_t)di.dli_saddr;
+    return di.dli_sname;
+}
+
+// Fatal error: a message on the console (the SDL subset shows it as a notification); the details are in the log.
+void plat_fatal_notice(void) {
+    if (!g_log_path[0]) return;
+    fflush(stderr);
+    char text[1200];
+    snprintf(text, sizeof text, "WSword stopped because of an error. Details: %s", g_log_path);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "WSword", text, NULL);
+}
+
+void plat_print_backtrace(void) {
+    // Frame pointers: the runtime and the game code keep them (-fno-omit-frame-pointer in the PS5 build).
+    uint64_t *fp = __builtin_frame_address(0);
+    for (int i = 0; i < 64 && fp && ((uintptr_t)fp & 7) == 0; i++) {
+        uint64_t pc = fp[1], off = 0;
+        if (!pc) break;
+        const char *s = plat_symbol(pc, &off);
+        extern const char *rt_host_fn_name(uint64_t pc, uint64_t *offset);  // runtime/dispatch.c
+        if (!s) s = rt_host_fn_name(pc, &off);
+        fprintf(stderr, "  #%-2d %016llx %s+%llx\n", i, (unsigned long long)pc, s ? s : "?", (unsigned long long)off);
+        uint64_t *next = (uint64_t *)(uintptr_t)fp[0];
+        if (next <= fp) break;
+        fp = next;
+    }
+}
+
+static void crash_handler(int sig, siginfo_t *si, void *ctx) {
+    ucontext_t *uc = ctx;
+    static volatile int depth;
+    if (sig == SIGABRT && depth++ > 0) { signal(SIGABRT, SIG_DFL); abort(); }
+    uint64_t fa = (uint64_t)(uintptr_t)si->si_addr;
+    if ((sig == SIGSEGV || sig == SIGBUS) && lazy_commit(fa)) return;
+    uint64_t pc = (uint64_t)uc->uc_mcontext.mc_rip, sp = (uint64_t)uc->uc_mcontext.mc_rsp, lr = 0;
+    if (sig != SIGSEGV || (fa & ~0xFFFull) != (sp & ~0xFFFull)) lr = *(uint64_t *)(uintptr_t)sp;
+    g_fault_is_write = (uc->uc_mcontext.mc_err & 2) != 0;  // (x86 page fault error code: bit 1 = write)
+    if (rt_fault_watch(fa, pc)) return;
+    char what[32];
+    snprintf(what, sizeof what, "signal %d", sig);
+    rt_fault_report(what, fa, pc, lr);
+}
+
+void plat_crash_handler_reclaim(void) {}
+
+void plat_crash_handler_install(void) {
+    stack_t ss = {.ss_sp = malloc(1 << 20), .ss_size = 1 << 20};
+    sigaltstack(&ss, NULL);
+    struct sigaction sa = {0};
+    sa.sa_sigaction = crash_handler;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGFPE, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+}
+
+// ---- child processes: none on the console (the game code generator and compiler run on the PC)
+PlatProc plat_spawn(const char *const argv[], const char *log_path, bool append_log) {
+    (void)argv, (void)log_path, (void)append_log;
+    return 0;
+}
+void plat_proc_kill(PlatProc p) { (void)p; }
+int plat_proc_wait(PlatProc p, bool block) { (void)p, (void)block; return 255; }
+
+static int rm_entry(const char *path, const struct stat *sb, int flag, struct FTW *ftw) {
+    (void)sb, (void)flag, (void)ftw;
+    return remove(path);
+}
+bool plat_remove_tree(const char *dir) { return nftw(dir, rm_entry, 16, FTW_DEPTH | FTW_PHYS) == 0; }
+
+void plat_terminate(void) { _exit(0); }

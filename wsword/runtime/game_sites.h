@@ -1,0 +1,40 @@
+// Addresses in the game's main module that the runtime reads or writes. They differ between game versions:
+// tools/game_sites.py finds them for the version the game code was generated from, and the game library carries them
+// (runtime/gamelib.h, the generated layout.c). g_site holds them once the library is loaded (gamelib_load).
+#pragma once
+#include <stdint.h>
+
+// name (as in tools/game_sites.py) and what is there
+#define GAME_SITES(X)                                                                                                  \
+    X(opt_table)               /* the Options screen's option table: u32 count, +8 entries, +0x10 rows, +0x18 order */ \
+    X(screen_mgr)              /* ScreenMgr *: +0x28 screen count, +0x30 screen pointers by id */                      \
+    X(opt_screen_rows)         /* field: the Options screen's row count, +8 its rows (1.8.2 +0x3698, 1.9.0 +0x36b0) */ \
+    X(title_options_state)     /* field: the title menu's active button screen (0x6a: Options; 1.8.2 +0x363c) */       \
+    X(dialog_answer)           /* the two-button dialog's answer (u32) */                                              \
+    X(pause_state)             /* u32: 0 playing, 2 in the pause menu or the map */                                    \
+    X(event_mgr)               /* ksys::evt::Manager *: its active event at +0x1d2b8 */                                \
+    X(controller_step)         /* float: the controllers' hold counter step (1) */                                     \
+    X(frame_loop_interval_ret) /* the frame loop's return address from setting the present interval */                \
+    X(title_version_format)    /* "Ver.%s": the title screen's version line */                                         \
+    X(player_info)             /* uking::act::PlayerInfo * (test tools) */                                              \
+    X(world_mgr)               /* ksys::world::Manager * (test tools) */                                                \
+    X(main_data)               /* main's .data (then .bss, up to main_end) */                                           \
+    X(main_end)
+
+typedef struct {
+#define GAME_SITE_FIELD(n) uint64_t n;
+    GAME_SITES(GAME_SITE_FIELD)
+#undef GAME_SITE_FIELD
+} GameSites;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+extern GameSites g_site;
+// The game version the loaded game code is for ("1.8.2"; "" before gamelib_load).
+extern const char *g_game_version;
+
+#ifdef __cplusplus
+}
+#endif
