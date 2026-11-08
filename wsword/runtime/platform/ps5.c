@@ -9,7 +9,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <ftw.h>
+#include <dirent.h>
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
@@ -246,10 +246,22 @@ PlatProc plat_spawn(const char *const argv[], const char *log_path, bool append_
 void plat_proc_kill(PlatProc p) { (void)p; }
 int plat_proc_wait(PlatProc p, bool block) { (void)p, (void)block; return 255; }
 
-static int rm_entry(const char *path, const struct stat *sb, int flag, struct FTW *ftw) {
-    (void)sb, (void)flag, (void)ftw;
-    return remove(path);
+// rm -rf (the title's libc has no nftw)
+bool plat_remove_tree(const char *dir) {
+    struct stat st;
+    if (lstat(dir, &st)) return errno == ENOENT;
+    if (!S_ISDIR(st.st_mode)) return remove(dir) == 0;
+    DIR *d = opendir(dir);
+    if (!d) return false;
+    bool ok = true;
+    char path[1024];
+    for (struct dirent *e; (e = readdir(d));) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
+        ok &= plat_remove_tree(path);
+    }
+    closedir(d);
+    return rmdir(dir) == 0 && ok;
 }
-bool plat_remove_tree(const char *dir) { return nftw(dir, rm_entry, 16, FTW_DEPTH | FTW_PHYS) == 0; }
 
 void plat_terminate(void) { _exit(0); }

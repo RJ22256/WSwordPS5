@@ -1,1 +1,1 @@
-SheikahSlate 06fe6c6254405300106a9c050d14009c372eaa2e (2026-11-08) PC: memscan_os.c - mincore's char * on the PS5 too (as BSD declares it)
+SheikahSlate e49bd8ebfed73748254d08ea0fec2353fccb7741 (2026-11-08) PC: platform/ps5.c - rm -rf without nftw (the PS5 title's libc has none)
