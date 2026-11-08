@@ -87,8 +87,11 @@ jobs:
       - name: The title
         working-directory: WSwordPS5
         run: |
-          bash ps5/tools/setup-sdk.sh > /dev/null
-          bash ps5/tools/build.sh
+          sdk=$(bash ps5/tools/setup-sdk.sh)
+          for so in "$sdk"/target/lib/*.so; do
+            "$sdk/bin/llvm-nm" -D --defined-only "$so" 2>/dev/null | grep -q " radv_EnumeratePhysicalDevices$" && echo "defines radv_EnumeratePhysicalDevices: $so"
+          done
+          LINK_TRACE_SYMBOL=radv_EnumeratePhysicalDevices bash ps5/tools/build.sh
           ls -la dist/PPSA99777
       - name: The zip
         working-directory: WSwordPS5
