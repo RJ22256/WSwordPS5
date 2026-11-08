@@ -1,0 +1,107 @@
+# WSword PS5: the title (PPSA99777) built for a jailbroken PS5 - its eboot.bin, sce_sys and files - on the PS5 stack:
+# mihawk-99's PS5_Vulkan (RADV, Mesa's Vulkan driver, built for the console from PS5_Mesa; its native tool, which signs
+# the eboot, and libc.prx) and the PS5 payload SDK fork (PS5_PayloadSDK). Started by hand with a tag, the zip is
+# published as a release of this repository.
+name: Build PS5 title
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish the PPSA folder as a release with this tag (e.g. v0.1.0-m1); empty: none"
+        required: false
+        default: ""
+      release_notes:
+        description: "Release notes: a Markdown file in the repository"
+        required: false
+        default: ""
+
+jobs:
+  ps5:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: WSwordPS5
+          submodules: recursive
+      - name: Host tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang-18 lld-18 llvm-18 cmake ninja-build glslang-tools rsync curl zstd \
+            python3-numpy python3-pil python3-mako python3-pip bison flex pkg-config zlib1g-dev libzstd-dev \
+            libexpat1-dev libelf-dev libdrm-dev spirv-tools
+          sudo ln -sf /usr/bin/clang-18 /usr/local/bin/clang
+          sudo ln -sf /usr/bin/clang++-18 /usr/local/bin/clang++
+          sudo ln -sf /usr/bin/ld.lld-18 /usr/local/bin/ld.lld
+          for t in llvm-ar llvm-objcopy llvm-nm llvm-ranlib llvm-strip; do sudo ln -sf /usr/bin/$t-18 /usr/local/bin/$t; done
+          pip install --user --break-system-packages "meson>=1.4" packaging pyyaml
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          clang --version | head -1; meson --version
+      - name: The PS5 stack beside it
+        run: |
+          git clone -q https://github.com/mihawk-99/PS5_Vulkan.git
+          git clone -q https://github.com/mihawk-99/PS5_PayloadSDK.git
+          git -C PS5_Vulkan log -1 --format='PS5_Vulkan %h %ci'
+          echo "VULKAN_REV=$(git -C PS5_Vulkan rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "MESA_PIN=$(sed -n 's/^mesa_revision=//p' PS5_Vulkan/tools/build-radv.sh)" >> "$GITHUB_ENV"
+      - name: RADV cache
+        id: radv
+        uses: actions/cache@v4
+        with:
+          path: |
+            PS5_Vulkan/.deps
+            PS5_Vulkan/build/host
+            PS5_Vulkan/runtime/libc.prx
+          key: ps5-radv-${{ env.MESA_PIN }}-${{ env.VULKAN_REV }}
+          restore-keys: ps5-radv-${{ env.MESA_PIN }}-
+      - name: PS5_Mesa at PS5_Vulkan's pin
+        run: |
+          mkdir PS5_Mesa && cd PS5_Mesa
+          git init -q && git remote add origin https://github.com/mihawk-99/PS5_Mesa.git
+          git fetch -q --depth 1 origin "$MESA_PIN" && git checkout -q FETCH_HEAD
+          git log -1 --format='PS5_Mesa %h %ci'
+      - name: Payload SDK, native tool, libc.prx, RADV (a long build the first time)
+        working-directory: PS5_Vulkan
+        run: |
+          bash tools/setup-native-dependencies.sh
+          [[ -x build/host/ps5-native-tool && -f runtime/libc.prx ]] || make > ../make.log 2>&1 || true
+          [[ -x build/host/ps5-native-tool && -f runtime/libc.prx ]] || { tail -60 ../make.log; exit 1; }
+          prov=.deps/native/radv-release/PROVENANCE.txt
+          if [[ "$(sed -n 's/^revision: //p' $prov 2>/dev/null)" != "$MESA_PIN" ]]; then
+            bash tools/build-radv.sh release
+          fi
+          ls -la .deps/native/radv-release/lib/
+      - name: The title
+        working-directory: WSwordPS5
+        run: |
+          bash ps5/tools/setup-sdk.sh > /dev/null
+          bash ps5/tools/build.sh
+          ls -la dist/PPSA99777
+      - name: The zip
+        working-directory: WSwordPS5
+        run: |
+          ver=$(python3 -c 'import json; print(json.load(open("ps5/sce_sys/param.json"))["contentVersion"])')
+          cd dist && zip -qr "../WSwordPS5-PPSA99777.zip" PPSA99777 && cd ..
+          sha256sum WSwordPS5-PPSA99777.zip > WSwordPS5-PPSA99777.zip.sha256
+          echo "::notice title=Zip::$(du -m WSwordPS5-PPSA99777.zip | cut -f1) MB"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WSwordPS5-PPSA99777
+          path: WSwordPS5/WSwordPS5-PPSA99777.zip
+          retention-days: 7
+      - name: Release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.release != '' }}
+        working-directory: WSwordPS5
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.release }}
+          NOTES: ${{ inputs.release_notes }}
+        run: |
+          if [[ -n "$NOTES" && -f "$NOTES" ]]; then n=(--notes-file "$NOTES"); else n=(--notes "WSword PS5 $TAG"); fi
+          gh release create "$TAG" WSwordPS5-PPSA99777.zip WSwordPS5-PPSA99777.zip.sha256 --target "$GITHUB_SHA" \
+            --title "WSword PS5 $TAG" --prerelease "${n[@]}"
