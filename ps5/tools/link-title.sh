@@ -66,7 +66,10 @@ if $platform_has_localeconv && [[ " ${radv_link_flags[*]} " != *" --defsym=local
     printf '{\n    local:\n        localeconv;\n};\n' > "$work/link/localeconv-local.map"
     radv_link_flags+=(--defsym=localeconv=ps5_localeconv --version-script "$work/link/localeconv-local.map")
 fi
-"$sdk/bin/prospero-lld" "${radv_linker_script[@]}" --eh-frame-hdr "${radv_link_flags[@]}" \
+# (WSword PS5) RADV's entry-point tables name every Vulkan function through a weak reference, and the ones RADV leaves
+# to Mesa's common code (radv_EnumeratePhysicalDevices...) stay undefined: kept out of the dynamic symbols - null, as
+# vkQuake links them (-z nodynamic-undefined-weak) - instead of imports the native tool can't find in any module.
+"$sdk/bin/prospero-lld" "${radv_linker_script[@]}" --eh-frame-hdr -z nodynamic-undefined-weak "${radv_link_flags[@]}" \
     --version-script "$native/app-symbols.map" --exclude-libs=ALL \
     -e _start -o "$work/link/llvm-pie.elf" \
     "$work/link/obj/app_crt.o" "${objects[@]}" \
