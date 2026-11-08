@@ -34,3 +34,18 @@ bash "$ps5/tools/link-title.sh" "$work" "$vulkan" "$sdk" \
     --whole-archive "$out/libwsword.a" --no-whole-archive \
     "$deps/lib/libavformat.a" "$deps/lib/libavcodec.a" "$deps/lib/libswscale.a" "$deps/lib/libavutil.a" \
     "$deps/lib/libshaderc_combined.a"  # (zlib: RADV's link has PS5_Vulkan's, the same pinned build)
+
+# What the PC's folder ships beside WSword.exe (the PC Makefile's dist): the fonts, WSword's art, the colour LUTs,
+# the notices - beside eboot.bin, where the runtime looks for them (runtime/paths.c rt_resource: the program's folder)
+app="$root/dist/$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["titleId"])' "$ps5/sce_sys/param.json")"
+w=$root/wsword
+cp "$w"/third_party/fonts/FiraSans/FiraSans-SemiBold.ttf "$w"/third_party/fonts/FiraSans/FiraSans-Medium.ttf \
+    "$w"/third_party/fonts/NotoSansThai/NotoSansThai-Medium.ttf "$w"/third_party/fonts/Inter/Inter-Bold.otf \
+    "$w"/third_party/fonts/Inter/Inter-Medium.otf "$w"/third_party/fonts/ChakraPetch/ChakraPetch-Bold.ttf "$app/"
+for f in FiraSans NotoSansThai Inter ChakraPetch; do cp "$w/third_party/fonts/$f/OFL.txt" "$app/$f-OFL.txt"; done
+cp "$w"/assets/launcher-background.png "$w"/assets/app-icon-*.png "$w"/assets/icon.png "$app/"
+mkdir -p "$app/colour-luts" && cp "$w"/third_party/luts/*.cube "$w"/third_party/luts/README.md "$app/colour-luts/"
+cp "$w/third_party/lsfg-vk/LICENSE.md" "$app/lsfg-vk-LICENSE.md"
+cp "$w/third_party/FidelityFX/LICENSE.txt" "$app/FidelityFX-LICENSE.txt"
+rm -rf "$app/assets" "$app/shaders"  # (the template's samples' assets, not WSword's)
+echo "==> WSword $(cat "$w/VERSION") for the PS5: $app"

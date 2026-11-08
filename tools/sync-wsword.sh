@@ -6,12 +6,14 @@ set -euo pipefail
 src=$(cd -- "${1:?usage: tools/sync-wsword.sh <SheikahSlate>/pc}" && pwd)
 dst=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/wsword
 [[ -f $src/runtime/platform/ps5.c ]] || { echo "$src: no runtime/platform/ps5.c (not a WSword PC tree with the PS5 layer)" >&2; exit 1; }
-rm -rf "$dst/runtime" "$dst/third_party" "$dst/tools"
+rm -rf "$dst/runtime" "$dst/third_party" "$dst/tools" "$dst/assets"
 mkdir -p "$dst"
 # (the PC's own platform layers and the macOS renderer are left out: the console build compiles neither)
 cp -R "$src/runtime" "$dst/runtime"
 rm -f "$dst"/runtime/platform/{windows,macos,linux}* "$dst"/runtime/nvn/*.m
 cp -R "$src/third_party" "$dst/third_party"
+cp -R "$src/assets" "$dst/assets"  # (WSword's own art: the start screen, the icons)
+cp "$src/docs/icon/wsword_1024.png" "$dst/assets/icon.png"
 cp -R "$src/tools" "$dst/tools"  # (the game code's id is made from the generator's sources: runtime/gamelib.h)
 cp "$src/Makefile" "$dst/Makefile.pc"  # (reference: the PC build's flags and generated files)
 {
