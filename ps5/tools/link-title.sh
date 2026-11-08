@@ -69,13 +69,29 @@ fi
 # (WSword PS5) RADV's entry-point tables name every Vulkan function through a weak reference, and the ones RADV leaves
 # to Mesa's common code (radv_EnumeratePhysicalDevices...) stay undefined: kept out of the dynamic symbols - null, as
 # vkQuake links them (-z nodynamic-undefined-weak) - instead of imports the native tool can't find in any module.
-"$sdk/bin/prospero-lld" "${radv_linker_script[@]}" --eh-frame-hdr -z nodynamic-undefined-weak ${LINK_TRACE_SYMBOL:+--trace-symbol=$LINK_TRACE_SYMBOL} "${radv_link_flags[@]}" \
-    --version-script "$native/app-symbols.map" --exclude-libs=ALL \
-    -e _start -o "$work/link/llvm-pie.elf" \
-    "$work/link/obj/app_crt.o" "${objects[@]}" \
-    "$work/link/stubs/libSceAgc.so" "$work/link/stubs/libSceAgcDriver.so" \
-    "${radv_link_inputs[@]}" \
-    --as-needed "$sdk"/target/lib/*.so
+link_title() {
+    "$sdk/bin/prospero-lld" "${radv_linker_script[@]}" --eh-frame-hdr -z nodynamic-undefined-weak ${LINK_TRACE_SYMBOL:+--trace-symbol=$LINK_TRACE_SYMBOL} "${radv_link_flags[@]}" \
+        --version-script "$native/app-symbols.map" --exclude-libs=ALL \
+        -e _start -o "$work/link/llvm-pie.elf" \
+        "$work/link/obj/app_crt.o" "${objects[@]}" \
+        "$work/link/stubs/libSceAgc.so" "$work/link/stubs/libSceAgcDriver.so" \
+        "${radv_link_inputs[@]}" \
+        --as-needed "$sdk"/target/lib/*.so "$@"
+}
+link_title
+# (WSword PS5) The entry points RADV's tables name but RADV leaves to Mesa's common code (radv_EnumeratePhysicalDevices
+# and others) end up as dynamic imports no console module exports, and the native tool refuses them. They are null on
+# every other platform (weak references): bound to 0 here, and the title linked again.
+radv_nulls=$(comm -23 \
+    <("$sdk/bin/llvm-nm" -D --undefined-only "$work/link/llvm-pie.elf" | awk '$1 == "U" || $1 == "w" { sub(/@.*/, "", $2); print $2 }' |
+        { grep -E '^(radv|vk_common|wsi)_' || true; } | sort -u) \
+    <(for library in "$sdk"/target/lib/*.so; do "$sdk/bin/llvm-nm" -D --defined-only "$library" 2>/dev/null | awk '{ print $NF }'; done | sort -u))
+if [[ -n $radv_nulls ]]; then
+    echo "link-title.sh: $(wc -w <<<"$radv_nulls") entry points RADV leaves undefined, bound to null: $(head -c 300 <<<"${radv_nulls//$'\n'/ }")..."
+    defs=()
+    for name in $radv_nulls; do defs+=("--defsym=$name=0"); done
+    link_title "${defs[@]}"
+fi
 # A title whose localeconv is still the console's reads every glTF fraction as 0
 # (black materials, models scaled to nothing): refuse it here, not on the console
 if $platform_has_localeconv &&
