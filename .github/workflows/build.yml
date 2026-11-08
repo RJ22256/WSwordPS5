@@ -84,7 +84,7 @@ jobs:
             bash tools/build-radv.sh release
           fi
           ls -la .deps/native/radv-release/lib/
-      - name: The title
+      - name: The template's samples (the toolchain's check)
         working-directory: WSwordPS5
         run: |
           bash ps5/tools/build.sh
@@ -100,14 +100,15 @@ jobs:
           command -v nasm || sudo apt-get install -y -qq nasm
           sdk=$(bash ps5/tools/setup-sdk.sh)
           bash ps5/wsword/deps.sh "$sdk" build/wsword-deps ../PS5_Vulkan/.deps/native/zlib/root
-      - name: WSword runtime (libwsword.a) and what it still needs
+      - name: WSword as the title (eboot.bin)
         working-directory: WSwordPS5
         run: |
+          rm -rf dist  # (the template's samples above: the toolchain's check, not released)
+          bash ps5/wsword/build.sh
           sdk=$(bash ps5/tools/setup-sdk.sh)
-          python3 ps5/wsword/configure.py --sdk "$sdk" --deps build/wsword-deps --out build/wsword
-          ninja -C build/wsword
           python3 ps5/wsword/missing.py --sdk "$sdk" build/wsword/libwsword.a build/wsword-deps/lib/*.a \
             | tee build/wsword/missing.txt >> "$GITHUB_STEP_SUMMARY"
+          ls -la dist/PPSA99777
       - name: The zip
         working-directory: WSwordPS5
         run: |

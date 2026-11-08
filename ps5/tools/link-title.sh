@@ -69,8 +69,11 @@ fi
 # (WSword PS5) RADV's entry-point tables name every Vulkan function through a weak reference, and the ones RADV leaves
 # to Mesa's common code (radv_EnumeratePhysicalDevices...) stay undefined: kept out of the dynamic symbols - null, as
 # vkQuake links them (-z nodynamic-undefined-weak) - instead of imports the native tool can't find in any module.
+# LINK_EXTRA_FLAGS: the title's own (WSword: ps5/wsword/build.sh's wraps)
+read -r -a link_extra <<<"${LINK_EXTRA_FLAGS:-}"
 link_title() {
-    "$sdk/bin/prospero-lld" "${radv_linker_script[@]}" --eh-frame-hdr -z nodynamic-undefined-weak ${LINK_TRACE_SYMBOL:+--trace-symbol=$LINK_TRACE_SYMBOL} "${radv_link_flags[@]}" \
+    "$sdk/bin/prospero-lld" "${radv_linker_script[@]}" --eh-frame-hdr -z nodynamic-undefined-weak "${radv_link_flags[@]}" \
+        ${link_extra[@]+"${link_extra[@]}"} \
         --version-script "$native/app-symbols.map" --exclude-libs=ALL \
         -e _start -o "$work/link/llvm-pie.elf" \
         "$work/link/obj/app_crt.o" "${objects[@]}" \

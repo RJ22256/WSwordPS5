@@ -113,6 +113,17 @@ def main():
     }
     for s in rt:
         obj(s, "cc", rtflags + " " + extra.get(s, ""), smaa_inc if s.endswith("smaa_data.c") else "")
+    # the console's side (ps5/wsword): the SDL3 subset, the Vulkan commands (vkgen.py), the process end
+    ps5w = os.path.join(ROOT, "ps5", "wsword")
+    for s in ("sdl/sdl_ps5.c", "ps5_glue.c"):
+        o = f"{out}/obj/ps5/{os.path.splitext(s)[0]}.o"
+        objs.append(o)
+        n.append(f"build {o}: cc {ps5w}/{s}\n  flags = {common} -std=gnu17 {inc}\n")
+    vkc = f"{out}/gen/vk_dispatch.c"
+    n.append(f"rule vkgen\n  command = {sys.executable} {ps5w}/vkgen.py $in $out\n  description = vkgen\n")
+    n.append(f"build {vkc}: vkgen {deps}/include/vulkan/vulkan_core.h | {ps5w}/vkgen.py\n")
+    objs.append(f"{out}/obj/ps5/vk_dispatch.o")
+    n.append(f"build {out}/obj/ps5/vk_dispatch.o: cc {vkc}\n  flags = {common} -std=gnu17 -w {inc}\n")
     for s in files("runtime/nvn/vulkan", {".c"}):
         obj(s, "cc", rtflags + (f" -DSPIRV_ID='\"{spirv_id}\"'" if s.endswith("spirv.c") else ""))
     for s in files("runtime/nvn/vulkan", {".cpp"}):

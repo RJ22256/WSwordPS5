@@ -5,7 +5,7 @@ and the SDK's libc export. Grouped by what will provide them (a Markdown report,
 
   SDL3      the title's SDL subset (ps5/wsword/sdl)
   Vulkan    RADV, linked into the title (PS5_Vulkan)
-  linker    section bounds and the like, which the final link defines
+  linker    section bounds, --wrap's __real_ names, RADV's vk_icdGetInstanceProcAddr: the final link's
   other     anything else: what the console lacks and needs a replacement
 """
 import argparse
@@ -50,10 +50,10 @@ def main():
     for s in missing:
         if s.startswith("SDL_"):
             groups["SDL3"].append(s)
+        elif s.startswith(("__start_", "__stop_", "__real_")) or s in ("__dso_handle", "vk_icdGetInstanceProcAddr"):
+            groups["linker"].append(s)
         elif s.startswith("vk"):
             groups["Vulkan"].append(s)
-        elif s.startswith(("__start_", "__stop_")) or s in ("__dso_handle",):
-            groups["linker"].append(s)
         else:
             groups["other"].append(s)
     print(f"### WSword runtime for the PS5: {len(missing)} symbols from outside\n")
