@@ -48,7 +48,7 @@ jobs:
           git clone -q https://github.com/mihawk-99/PS5_PayloadSDK.git
           git -C PS5_Vulkan log -1 --format='PS5_Vulkan %h %ci'
           echo "VULKAN_REV=$(git -C PS5_Vulkan rev-parse HEAD)" >> "$GITHUB_ENV"
-          echo "MESA_PIN=$(sed -n 's/^mesa_revision=//p' PS5_Vulkan/tools/build-radv.sh)" >> "$GITHUB_ENV"
+          echo "MESA_PIN=$(sed -n 's/^mesa_revision=.*\([0-9a-f]\{40\}\).*/\1/p' PS5_Vulkan/tools/build-radv.sh)" >> "$GITHUB_ENV"
       - name: RADV cache
         id: radv
         uses: actions/cache@v4
