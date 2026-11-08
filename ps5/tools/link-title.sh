@@ -85,14 +85,19 @@ link_title
 radv_nulls=$(comm -23 \
     <("$sdk/bin/llvm-nm" -D --undefined-only "$work/link/llvm-pie.elf" | awk '$1 == "U" || $1 == "w" { sub(/@.*/, "", $2); print $2 }' |
         sort -u) \
-    <(for library in "$sdk"/target/lib/*.so; do "$sdk/bin/llvm-nm" -D --defined-only "$library" 2>/dev/null | awk '{ print $NF }'; done | sort -u))
+    <(for library in "$sdk"/target/lib/*.so "$work/link/stubs/libSceAgc.so" "$work/link/stubs/libSceAgcDriver.so"; do
+        "$sdk/bin/llvm-nm" -D --defined-only "$library" 2>/dev/null | awk '{ print $NF }'; done | sort -u))
 if [[ -n $radv_nulls ]]; then
     echo "link-title.sh: $(wc -w <<<"$radv_nulls") imports no console module exports, bound to null (RADV's and its layers' unimplemented entry points)"
     others=$(grep -vE '^(radv|sqtt|rra|rmv|metro_exodus|annotate|ctx_roll|vk_common|wsi|anv|tu|lvp|vk_)' <<<"$radv_nulls" || true)
     [[ -z $others ]] || echo "link-title.sh: of them, not driver entry points (calls there would crash): ${others//$'\n'/ }"
-    defs=()
-    for name in $radv_nulls; do defs+=("--defsym=$name=0"); done
-    link_title "${defs[@]}"
+    # hidden absolute symbols at 0, in an object of their own: defined (no import), and not exported (the native
+    # tool publishes no application exports)
+    {
+        for name in $radv_nulls; do printf '.globl %s\n.hidden %s\n.set %s, 0\n' "$name" "$name" "$name"; done
+    } > "$work/link/obj/null_imports.s"
+    cc -c -x assembler "$work/link/obj/null_imports.s" -o "$work/link/obj/null_imports.o"
+    link_title "$work/link/obj/null_imports.o"
 fi
 # A title whose localeconv is still the console's reads every glTF fraction as 0
 # (black materials, models scaled to nothing): refuse it here, not on the console
