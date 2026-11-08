@@ -49,7 +49,10 @@ jobs:
           clang --version | head -1; meson --version
       - name: The PS5 stack beside it
         run: |
+          # PS5_Vulkan at the revision of the template's time (2026-10-07): its HEAD's RADV left entry points the
+          # template's link can't resolve (radv_EnumeratePhysicalDevices)
           git clone -q https://github.com/mihawk-99/PS5_Vulkan.git
+          git -C PS5_Vulkan checkout -q "${PS5_VULKAN_REV:-4e41388958f861b02e06451e014e65871fa4ffa7}"
           git clone -q https://github.com/mihawk-99/PS5_PayloadSDK.git
           git -C PS5_Vulkan log -1 --format='PS5_Vulkan %h %ci'
           echo "VULKAN_REV=$(git -C PS5_Vulkan rev-parse HEAD)" >> "$GITHUB_ENV"
