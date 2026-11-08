@@ -27,7 +27,9 @@ printf 'wsword' > "$work/samples.txt"  # (link-title.sh's list of samples: no sh
 # - the runtime whole: its HLE functions, services and reset hooks are only reached through their sections
 # - main, exit, _exit and atexit wrapped: the title ends through the shell (ps5/wsword/ps5_glue.c)
 # - the section bounds kept with what they bound
-export LINK_EXTRA_FLAGS="--wrap=main --wrap=exit --wrap=_exit --wrap=atexit -z nostart-stop-gc"
+# - the registration tables in the data segment (ps5/wsword/sections.ld)
+export LINK_EXTRA_FLAGS="--wrap=main --wrap=exit --wrap=_exit --wrap=atexit -z nostart-stop-gc -T $ps5/wsword/sections.ld"
+trap '[[ -f $work/link/llvm-pie.elf ]] && "$(command -v llvm-readelf-18 || command -v llvm-readelf || echo readelf)" -lSW "$work/link/llvm-pie.elf" | grep -vE "^\s*$" | head -120' ERR
 bash "$ps5/tools/link-title.sh" "$work" "$vulkan" "$sdk" \
     --whole-archive "$out/libwsword.a" --no-whole-archive \
     "$deps/lib/libavformat.a" "$deps/lib/libavcodec.a" "$deps/lib/libswscale.a" "$deps/lib/libavutil.a" \
