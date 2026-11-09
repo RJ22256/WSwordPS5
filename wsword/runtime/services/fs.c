@@ -22,6 +22,7 @@
 #include "../mods.h"
 #include "archive.h"
 #include "fs_layout.h"
+#include "../nvn/pad_illust.h"
 
 #define FS_PATH_NOT_FOUND MAKE_RESULT(2, 1)
 #define FS_PATH_EXISTS MAKE_RESULT(2, 2)
@@ -859,6 +860,8 @@ static void hud_letters_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz)
     uint8_t *pack = malloc(pn), *arc = NULL, *arc2 = NULL, *z2 = NULL;
     uint32_t pdoff, ps, pe, adoff, as, ae;
     int node = -1, panes = 0;
+    uint8_t *ctl = NULL;
+    size_t ctl_n = 0;
     if (romfs_image_pread(R->img, pack, pn, R->rom_files[k].off) == (ssize_t)pn)
         node = sarc_find(pack, pn, "Layout/Common.sblarc", &pdoff, &ps, &pe);
     if (node >= 0) arc = yaz0_unpack(pack + pdoff + ps, pe - ps, &an);
@@ -866,7 +869,8 @@ static void hud_letters_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz)
     if (getenv("SAVAGEWIND_NO_HUD_LETTERS")) { free(pack), free(arc); return; }
     const char *why = node < 0 ? "no Layout/Common.sblarc" : !arc ? "archive not readable" : NULL;
     if (!why) {
-        arc2 = malloc(an + 4 * (0x80 + 0x2000));
+        ctl = pad_illust_layout(&ctl_n);  // (the player's controls screen: nvn/pad_illust.h)
+        arc2 = malloc(an + 4 * (0x80 + 0x2000) + (ctl ? ctl_n + 0x80 : 0));
         memcpy(arc2, arc, an);
         nn = an;
         for (int i = 0; i < 4 && !why; i++) {
@@ -889,6 +893,22 @@ static void hud_letters_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz)
             nn += ln;
         }
     }
+    if (!why && ctl) {  // the player's layout for the controls screen, at the end as the patched ones
+        int li = sarc_find(arc, an, PAD_ILLUST_LAYOUT, &adoff, &as, &ae);
+        if (li >= 0) {
+            size_t at = (nn + 0x7F) & ~(size_t)0x7F;
+            memset(arc2 + nn, 0, at - nn);
+            nn = at;
+            memcpy(arc2 + nn, ctl, ctl_n);
+            uint32_t s = (uint32_t)(nn - adoff), e = (uint32_t)(nn - adoff + ctl_n);
+            memcpy(arc2 + 0x20 + li * 16 + 8, &s, 4);
+            memcpy(arc2 + 0x20 + li * 16 + 12, &e, 4);
+            nn += ctl_n;
+            LOG("[fs] controls screen: the player's layout (%s/PaAllControllerTipsNN_00.bflyt, %zu bytes)\n", PAD_ILLUST_DIR, ctl_n);
+        }
+    }
+    free(ctl);
+    ctl = NULL;
     if (!why && panes != 12) why = "letters not as expected";
     if (why) {
         LOG("[fs] HUD letters: %s, the game's letters stay\n", why);

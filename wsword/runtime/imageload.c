@@ -27,6 +27,8 @@ const char *rt_image_error(void) { return stbi_failure_reason(); }
 
 void rt_image_free(void *px) { stbi_image_free(px); }
 
+unsigned char *rt_image_load(const char *path, int *w, int *h, int channels) { return stbi_load(path, w, h, NULL, channels); }
+
 bool rt_save_png(const char *path, const unsigned char *rgba, int w, int h) {
     if (w <= 0 || h <= 0) return false;
     size_t n = (size_t)w * (size_t)h * 4;

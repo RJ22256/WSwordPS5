@@ -16,6 +16,8 @@ unsigned char *rt_image_rgba(const char *path, int *w, int *h);   // malloc'd w*
 const char *rt_image_error(void);                                 // why the last rt_image_* call failed
 
 void rt_image_free(void *px);
+// The image as channels (1-4: grey, grey + alpha, RGB, RGBA) bytes a pixel; free with rt_image_free
+unsigned char *rt_image_load(const char *path, int *w, int *h, int channels);
 
 // 8-bit PNG, alpha forced opaque (render targets often keep the G-buffer's alpha, which viewers turn into black).
 bool rt_save_png(const char *path, const unsigned char *rgba, int w, int h);
