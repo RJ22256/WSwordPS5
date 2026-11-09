@@ -16,12 +16,14 @@ mkdir -p $W/cache $O/lib/std $O/rt
 export ZIG_GLOBAL_CACHE_DIR="$(cygpath -w "$PWD/$W/cache")" ZIG_LOCAL_CACHE_DIR="$(cygpath -w "$PWD/$W/cache")"
 mkdir -p $W/tmp
 export TMPDIR="$(cygpath -w "$PWD/$W/tmp")" TMP="$(cygpath -w "$PWD/$W/tmp")" TEMP="$(cygpath -w "$PWD/$W/tmp")"  # (MSYS's /c/... TMPDIR: not for zig)
-flags=() flags2=()  # (the game code's flags as gamebuild.c add_cflags passes them to zig; flags2: the compatible
-set=1                #  target's, when given)
+flags=() flags2=() flags3=()  # (the game code's flags as gamebuild.c add_cflags passes them to zig; flags2: the
+set=1                          #  compatible target's, when given; flags3, after --ps5: the PS5 export's)
 for f in "$@"; do
-    case $f in --) set=2; continue ;; -march=*) c=${f#-march=}; f="-mcpu=${c//-/_}" ;; esac
-    if [ $set = 1 ]; then flags+=("$f"); else flags2+=("$f"); fi
+    case $f in --) set=2; continue ;; --ps5) set=3; continue ;; -march=*) c=${f#-march=}; f="-mcpu=${c//-/_}" ;; esac
+    if [ $set = 1 ]; then flags+=("$f"); elif [ $set = 2 ]; then flags2+=("$f"); else flags3+=("$f"); fi
 done
+# (WSword) the PS5 export's compile as runtime/gamebuild.c runs it: the console's target and libc headers
+ps5=(-target x86_64-linux-none -nostdlib "${flags3[@]}" -nostdlibinc -isystem third_party/ps5-include -fPIC)
 
 # 1. the headers: what the generated C (cpu.h, simd.h; setjmp.h where it calls the guest setjmp: tools/gen.py
 #    setjmp_call) and tools/gamelib_entry.c include
@@ -29,10 +31,16 @@ printf '#include "cpu.h"\n#include "simd.h"\n#include <setjmp.h>\n' > $W/probe.c
 $Z/zig.exe cc "${flags[@]}" -Iruntime -c $W/probe.c -o $W/probe.o -MD -MF $W/probe.d
 $Z/zig.exe cc "${flags[@]}" -Iruntime '-DGAMELIB_ID="0"' -c tools/gamelib_entry.c -o $W/entry.o -MD -MF $W/entry.d
 : > $W/probe2.d
+: > $W/probe_ps5.d
+[ ${#flags3[@]} = 0 ] || {
+    $Z/zig.exe cc "${ps5[@]}" -Iruntime -c $W/probe.c -o $W/probe_ps5.o -MD -MF $W/probe_ps5.d
+    $Z/zig.exe cc "${ps5[@]}" -Iruntime '-DGAMELIB_ID="0"' -c tools/gamelib_entry.c -o $W/entry_ps5.o -MD -MF $W/entry_ps5.d
+    cat $W/entry_ps5.d >> $W/probe_ps5.d
+}
 [ ${#flags2[@]} = 0 ] ||
     $Z/zig.exe cc "${flags2[@]}" -Iruntime -c $W/probe.c -o $W/probe2.o -MD -MF $W/probe2.d
 n=0
-for h in $(cat $W/probe.d $W/probe2.d $W/entry.d | tr ' ' '\n' | tr -d '\r' | sed -n 's|^build/zig/lib/|lib/|p' | sort -u); do
+for h in $(cat $W/probe.d $W/probe2.d $W/entry.d $W/probe_ps5.d | tr ' ' '\n' | tr -d '\r' | sed -n 's|^build/zig/lib/|lib/|p' | sort -u); do
     mkdir -p "$O/$(dirname "$h")"
     cp "$Z/$h" "$O/$h"
     n=$((n + 1))
@@ -75,6 +83,12 @@ $O/zig.exe cc "${flags[@]}" -Iruntime -c $W/probe.c -o $W/probe2.o
 $O/zig.exe cc "${flags[@]}" -Iruntime '-DGAMELIB_ID="0"' -c tools/gamelib_entry.c -o $W/entry2.o
 (cd $W && "$OA/zig.exe" lld-link "@$(cygpath -w "$OA/rt/link.rsp")" "-LIBPATH:$(cygpath -w "$OA/rt")" \
     -OUT:probe2.dll dll.o host.a) || { echo "tools/zig_slim.sh: the slim zig's link failed"; exit 1; }
+if [ ${#flags3[@]} != 0 ]; then  # (the PS5 export's compile and link with the slim copy: nothing built from source)
+    $O/zig.exe cc "${ps5[@]}" -Iruntime -c $W/probe.c -o $W/probe_ps5b.o
+    $O/zig.exe cc "${ps5[@]}" -Iruntime '-DGAMELIB_ID="0"' -c tools/gamelib_entry.c -o $W/entry_ps5b.o
+    $O/zig.exe ld.lld -shared -o $W/probe_ps5.so $W/probe_ps5b.o $W/entry_ps5b.o ||
+        { echo "tools/zig_slim.sh: the slim zig's PS5 link failed"; exit 1; }
+fi
 built=$(find $W/cache2 -name '*.lib' | wc -l)
 [ "$built" = 0 ] || { echo "tools/zig_slim.sh: the slim zig still built $built libraries"; exit 1; }
 echo "build/zig-slim: $n headers, $(ls $O/rt | wc -l) runtime files, $(find $O -type f | wc -l) files, $(du -sh $O | cut -f1)"

@@ -23,6 +23,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <ps5platform/exec.h>
 #include <ps5platform/shm.h>
 
 #include "../gamelib.h"
@@ -115,6 +116,16 @@ int plat_protect(uint64_t addr, uint64_t size, int prot) {
     }
     return mprotect((void *)(uintptr_t)addr, size, prot == PLAT_PROT_NONE ? PROT_NONE
                                                    : prot == PLAT_PROT_READ ? PROT_READ : PROT_READ | PROT_WRITE);
+}
+
+// The game code's memory (runtime/elfload.c): direct memory, read, write and execute (ps5platform/exec.h), placed
+// anywhere outside the GPU window.
+void *plat_exec_alloc(size_t bytes) {
+    struct ps5_exec_request rq = {.bytes = bytes};
+    struct ps5_exec_region rg;
+    int r = ps5_exec_alloc(&rq, &rg);
+    if (r) { fprintf(stderr, "[plat] executable memory, %zu MB: %x\n", bytes >> 20, r); return NULL; }
+    return rg.base;
 }
 
 // ---- time

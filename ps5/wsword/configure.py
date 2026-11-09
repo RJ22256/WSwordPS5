@@ -20,12 +20,18 @@ import sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 W = os.path.join(ROOT, "wsword")
 
-# The console's CPU: AMD Zen 2 (8 cores, 16 threads), AVX2 / FMA / BMI2 - the PC's x86-64-v3 and more.
-ARCH = "-march=znver2"
-# The game code's flags (the PC Makefile's GENFLAGS for a tuned build: -O2 with the vectorizers, for the console's
-# CPU). The PS5 export on the PC builds it with exactly these; the id says so (runtime/gamelib.c).
-GENFLAGS = f"-O2 -fwrapv -fno-strict-aliasing -Wno-return-type -Wno-unused-label -fvisibility=hidden -Iruntime {ARCH}"
-GENFLAGS_ZIG = "-Xclang -O2 -g0 -fomit-frame-pointer"
+# The game code's flags for the console: the PC Makefile's GENFLAGS_PS5 / GENFLAGS_ZIG_PS5 (wsword/Makefile.pc), which
+# WSword Configuration's PS5 export builds it with - read from there, so the two ids agree (runtime/gamelib.c).
+def makefile_var(name):
+    for line in open(os.path.join(W, "Makefile.pc")):
+        if line.startswith(name + " :="):
+            return line.split(":=", 1)[1].split("#")[0].strip()
+    raise SystemExit(f"wsword/Makefile.pc has no {name} (a WSword without the PS5 export)")
+
+
+GENFLAGS = " ".join(makefile_var("GENFLAGS_PS5").split())
+GENFLAGS_ZIG = makefile_var("GENFLAGS_ZIG_PS5")
+ARCH = next(f for f in GENFLAGS.split() if f.startswith("-march="))  # (the console's CPU: AMD Zen 2)
 
 
 def sha16(paths, extra=""):
@@ -152,6 +158,12 @@ def main():
                 if f.endswith(".cpp"):
                     obj(os.path.relpath(os.path.join(dp, f), W), "cxx", lsfgflags)
 
+    # what the game code may import, by name (exports.py: runtime/elfload.c resolves the library's imports with it)
+    ps5w = os.path.join(ROOT, "ps5", "wsword")
+    n.append(f"rule exports\n  command = {sys.executable} {ps5w}/exports.py --sdk {sdk} --out $out $in\n  description = exports\n")
+    n.append(f"build {out}/gen/exports.c: exports {' '.join(objs)} | {ps5w}/exports.py\n")
+    n.append(f"build {out}/obj/ps5/exports.o: cc {out}/gen/exports.c\n  flags = {common} -std=gnu17 -w\n")
+    objs.append(f"{out}/obj/ps5/exports.o")
     n.append(f"build {out}/libwsword.a: ar {' '.join(objs)}\n")
     n.append(f"default {out}/libwsword.a\n")
     with open(os.path.join(out, "build.ninja"), "w") as f:

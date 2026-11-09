@@ -1,0 +1,34 @@
+# The PS5 export's compile, link and load, off the console: zig 0.17 (the release WSword ships) builds game-code-like C
+# for the console exactly as WSword Configuration does (runtime/gamebuild.c: the target, the console's libc headers,
+# zig's ld.lld), and runtime/elfload.c loads it on Linux. Started by hand, or when they change.
+name: PS5 export probe
+on:
+  workflow_dispatch:
+  push:
+    paths: ["ps5/wsword/test/**", "wsword/runtime/elfload.c", "wsword/runtime/gamebuild.c", ".github/workflows/export-probe.yml"]
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: zig 0.17
+        run: |
+          curl -fsSL -o zig.tar.xz https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz
+          echo "1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026  zig.tar.xz" | sha256sum -c
+          tar -xJf zig.tar.xz && mv zig-x86_64-linux-0.17.0 zig
+      - name: Compile and link as the PS5 export does
+        run: |
+          flags=$(sed -n 's/^GENFLAGS_PS5 := //p' wsword/Makefile.pc | sed 's/-Iruntime//; s/-march=\([a-z0-9]*\)/-mcpu=\1/')
+          zflags=$(sed -n 's/^GENFLAGS_ZIG_PS5 := //p' wsword/Makefile.pc)
+          id=$(sed -n 's/^.*GAMELIB_ID_PS5 := //p' wsword/Makefile.pc | head -1)
+          cc=(zig/zig cc -target x86_64-linux-none -nostdlib $flags $zflags -nostdlibinc -isystem wsword/third_party/ps5-include -fPIC -Iwsword/runtime)
+          echo "${cc[*]}"
+          "${cc[@]}" -c ps5/wsword/test/export_probe.c -o probe.o
+          "${cc[@]}" '-DGAMELIB_ID="probe"' -c wsword/tools/gamelib_entry.c -o entry.o
+          zig/zig ld.lld -shared -o swgame.so probe.o entry.o
+          llvm-readelf -hd --dyn-syms swgame.so | grep -E "Type:|Machine|NEEDED|UND|GLOBAL" | head -30
+          objdump -d probe.o | grep -c sqrtss && echo "sqrtf inlined"
+      - name: Load it (runtime/elfload.c)
+        run: |
+          cc -DELFLOAD_TEST -O1 -Iwsword/runtime ps5/wsword/test/export_host.c wsword/runtime/elfload.c -lm -o host
+          ./host swgame.so

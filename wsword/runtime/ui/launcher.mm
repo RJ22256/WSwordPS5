@@ -446,6 +446,42 @@ static bool build_game_code(void) {
     return ok;
 }
 
+#if !defined(__APPLE__) && !defined(__PROSPERO__)
+// (WSword) The PS5 export: the game code built for WSword on a jailbroken PS5 (WSwordPS5's PPSA99777 title), into
+// <data root>/PS5 (runtime/gamebuild.c). The game files are the same as here: the player copies both over.
+static std::string ps5_export_status(void) {  // "" = not built; else Done / Built for another version
+    std::string dir = std::string(rt_data_root()) + "/" GAMEBUILD_PS5_DIR "/swgame.so";
+    if (!file_exists(dir)) return "";
+    FILE *f = fopen((dir + ".id").c_str(), "rb");
+    char id[128] = "";
+    if (f) {
+        if (!fgets(id, sizeof id, f)) id[0] = 0;
+        fclose(f);
+    }
+    id[strcspn(id, "\r\n")] = 0;
+    return strcmp(id, gamebuild_ps5_id()) ? "Built for another version" : "Done";
+}
+
+static void *ps5_export_thread(void *) {
+    int cores = SDL_GetNumLogicalCPUCores(), ram_gb = SDL_GetSystemRAM() / 1024;
+    GameBuildOpts o = {build_progress, cores < ram_gb - 2 ? cores : ram_gb - 2 > 1 ? ram_gb - 2 : 1, true};
+    char why[256] = "";
+    g_build_frac = 0;
+    set_job("Building the game code for the PS5...");
+    bool ok = gamebuild_run(g_root.c_str(), &o, why, sizeof why);
+    if (ok) set_job("PS5 export done: copy PS5/swgame.so, PS5/swgame.so.id and the extracted folder to the console.");
+    else {
+        fprintf(stderr, "[launcher] PS5 export: %s\n", why);
+        set_job("The PS5 export failed", true, why);
+    }
+    g_build_frac = -1;
+    pthread_mutex_lock(&g_lock);
+    g_busy = false;
+    pthread_mutex_unlock(&g_lock);
+    return NULL;
+}
+#endif
+
 // ------------------------------------------------------------------ shader precompilation (runtime/nvn/precompile.h)
 // After a setup when its option is on (the setup page's PRECOMPILE ALL SHADERS, settings.precompile_shaders), or on
 // its own from the game files page of the configuration screen. The progress overlay shows it; Esc / B stops it
@@ -2479,6 +2515,28 @@ extern "C" void launcher_run(const char *root, int mode) {
                     }
 #endif
                 }
+#if !defined(__APPLE__) && !defined(__PROSPERO__)
+                if (ready && !g_setup_only && !g_confirm_delete) {  // (WSword) the PS5 export
+                    std::string st = ps5_export_status();
+                    std::string pd = tr("Builds the game code for WSword on a jailbroken PS5 (the PPSA99777 title from "
+                                        "WSwordPS5), from your game files here. Takes as long as the setup's build. Then "
+                                        "copy these into /data/homebrew/PPSA99777/ on the console over FTP: PS5/swgame.so "
+                                        "and PS5/swgame.so.id from WSword's folder, and the extracted folder. Use the "
+                                        "WSwordPS5 release made from the same WSword version.");
+                    pd += std::string("\n\n") + tr("Folder:") + " " + rt_data_root() + "/" GAMEBUILD_PS5_DIR;
+                    opt_section("PlayStation 5");
+                    if (busy) opt_disable_next();
+                    if (opt_action("Export for PS5", tr(st.empty() ? "Not done" : st.c_str()), pd.c_str(), true)) {
+                        g_file_size.set_suspended(true);
+                        pthread_mutex_lock(&g_lock);
+                        g_busy = true;
+                        pthread_mutex_unlock(&g_lock);
+                        pthread_t t;
+                        pthread_create(&t, NULL, ps5_export_thread, NULL);
+                        pthread_detach(t);
+                    }
+                }
+#endif
                 if (!ready || !g_confirm_delete) {  // choose the folder, set up (again: from it, or the game code alone)
                     opt_section(!ready ? "Your copy of the game" : "Set up again");
                     if (busy) opt_disable_next();
@@ -2542,7 +2600,11 @@ extern "C" void launcher_run(const char *root, int mode) {
                 if (g_setup_only && !busy) {  // where the rest is, later
                     ImGui::Dummy(ImVec2(0, 14 * sc));
                     ImGui::PushTextWrapPos(0);
-#ifdef _WIN32
+#if defined(__PROSPERO__)
+                    ImGui::TextDisabled("%s", tr("On the PS5, the game files come from your PC: in WSword Configuration, "
+                                                 "Game files > Export for PS5, then copy PS5/swgame.so, PS5/swgame.so.id and "
+                                                 "the extracted folder into /data/homebrew/PPSA99777/."));
+#elif defined(_WIN32)
                     ImGui::TextDisabled("%s", tr("To change settings or the game files later, open WSword Configuration."));
 #elif defined(__APPLE__)
                     ImGui::TextDisabled("%s", tr("To change settings or the game files later, hold Option while you open WSword."));

@@ -149,6 +149,13 @@ GAMELIB_SRCS := tools/gen.py tools/lifter.py tools/analyze.py tools/nso.py tools
                 runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/simd_softfma.h runtime/gamelib.h
 GAMELIB_SRCS += tools/layout.py tools/game_sites.py
 GAMELIB_ID := $(shell (cat $(GAMELIB_SRCS); echo '$(strip $(GENFLAGS))'; echo '$(GENFLAGS_ZIG)') | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16)
+# (WSword) The PS5 target: WSword Configuration's PS5 export builds the game code for the console (runtime/gamebuild.c:
+# its CPU, AMD Zen 2; the console's libc headers, third_party/ps5-include; an ELF shared object its title loads with
+# runtime/elfload.c). WSwordPS5's build reads these two lines (ps5/wsword/configure.py), so the console's runtime and
+# the export agree on the id.
+GENFLAGS_PS5 := -O2 -fwrapv -fno-strict-aliasing -Wno-return-type -Wno-unused-label -fvisibility=hidden -Iruntime -march=znver2
+GENFLAGS_ZIG_PS5 := -Xclang -O2 -g0 -fomit-frame-pointer
+GAMELIB_ID_PS5 := $(shell (cat $(GAMELIB_SRCS); echo '$(strip $(GENFLAGS_PS5))'; echo '$(GENFLAGS_ZIG_PS5)') | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16)
 # The compatible target (#9): x86-64 CPUs without AVX2 / FMA / BMI2 get the game code built with GENARCH_COMPAT in
 # place of GENARCH (no -mfma: simd.h's fma is runtime/simd_softfma.h, slower). The start screen builds the one the CPU
 # runs (runtime/gamelib.h gamelib_compat); its id differs, so neither library is ever loaded in place of the other.
@@ -235,7 +242,10 @@ $(B)/rt/gamelib.o: RTFLAGS += -DGAMELIB_ID='"$(GAMELIB_ID)"' $(GAMELIB_TARGETS)
 $(B)/rt/gamebuild.o: $(GAMELIB_SRCS) Makefile
 $(B)/rt/gamebuild.o: RTFLAGS += -DGAMELIB_CFLAGS='"$(strip $(filter-out -Iruntime,$(GENFLAGS)))"' \
                                 $(if $(GENFLAGS_COMPAT),-DGAMELIB_CFLAGS_COMPAT='"$(strip $(filter-out -Iruntime,$(GENFLAGS_COMPAT)))"') \
-                                -DGAMELIB_ZIGFLAGS='"$(GENFLAGS_ZIG)"' -DGAMELIB_SHARED='"$(GAMELIB_SHARED)"'
+                                -DGAMELIB_ZIGFLAGS='"$(GENFLAGS_ZIG)"' -DGAMELIB_SHARED='"$(GAMELIB_SHARED)"' \
+                                -DGAMELIB_PS5_ID='"$(GAMELIB_ID_PS5)"' \
+                                -DGAMELIB_PS5_CFLAGS='"$(strip $(filter-out -Iruntime,$(GENFLAGS_PS5)))"' \
+                                -DGAMELIB_PS5_ZIGFLAGS='"$(GENFLAGS_ZIG_PS5)"'
 
 # Windows guarded memory scans use SEH.
 $(B)/rt/memscan_os.o: RTFLAGS += -fms-extensions
@@ -367,11 +377,13 @@ dist:
 	cp $(WIN_B)/WSword.exe $(WIN_B)/WSword.dll.a "$(DIST)/"
 	cp $(WIN_B)/WSword-config.exe "$(DIST)/WSword Configuration.exe"
 	tools/zig_slim.sh $(strip $(filter-out -Iruntime,$(GENFLAGS))) \
-	    $(if $(GENFLAGS_COMPAT),-- $(strip $(filter-out -Iruntime,$(GENFLAGS_COMPAT))))  # (zig, its runtime built ahead of time)
+	    $(if $(GENFLAGS_COMPAT),-- $(strip $(filter-out -Iruntime,$(GENFLAGS_COMPAT)))) \
+	    --ps5 $(strip $(filter-out -Iruntime,$(GENFLAGS_PS5)))  # (zig, its runtime built ahead of time; the PS5 export's headers)
 	cp -R build/helper/swgen "$(DIST)/"
 	cp -R build/zig-slim "$(DIST)/zig"
 	cp runtime/cpu.h runtime/simd.h runtime/simd_fp.h runtime/simd_softfma.h runtime/gamelib.h tools/gamelib_entry.c \
 	    runtime/hle/hle_symbols.txt "$(DIST)/gamelib-src/"
+	cp -R third_party/ps5-include "$(DIST)/gamelib-src/ps5-include"  # (WSword's PS5 export: the console's libc headers, BSD)
 	cp docs/icon/wsword_1024.png "$(DIST)/icon.png"
 	cp third_party/fonts/FiraSans/FiraSans-SemiBold.ttf third_party/fonts/FiraSans/FiraSans-Medium.ttf "$(DIST)/"  # (menus, OFL)
 	cp third_party/fonts/FiraSans/OFL.txt "$(DIST)/FiraSans-OFL.txt"

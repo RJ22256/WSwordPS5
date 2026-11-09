@@ -24,6 +24,21 @@
 #ifndef GAMELIB_SHARED
 #define GAMELIB_SHARED "-shared"
 #endif
+// (WSword) the PS5 target (Makefile GENFLAGS_PS5, GENFLAGS_ZIG_PS5, GAMELIB_ID_PS5)
+#ifndef GAMELIB_PS5_CFLAGS
+#define GAMELIB_PS5_CFLAGS "-O2 -fwrapv -fno-strict-aliasing -Wno-return-type -Wno-unused-label -fvisibility=hidden -march=znver2"
+#endif
+#ifndef GAMELIB_PS5_ZIGFLAGS
+#define GAMELIB_PS5_ZIGFLAGS "-Xclang -O2 -g0 -fomit-frame-pointer"
+#endif
+#ifndef GAMELIB_PS5_ID
+#define GAMELIB_PS5_ID "dev-ps5"
+#endif
+const char *gamebuild_ps5_id(void) { return GAMELIB_PS5_ID; }
+// The console's ABI as zig builds it: x86-64 ELF, no libc of zig's (the console's headers instead; its libc is
+// bound when the title loads the library), position-independent.
+#define PS5_ZIG_TARGET "x86_64-linux-none"
+static bool g_ps5;  // this build is the PS5's (gamebuild_run)
 
 #ifdef _WIN32
 #define SEP "\\"
@@ -110,6 +125,7 @@ typedef struct {
     char cc[1100];                     // compiler: zig (as `zig cc`), or SAVAGEWIND_CC / clang
     bool zig;
     char inc[1100], entry[1100], hle[1100];  // headers the game code includes, tools/gamelib_entry.c, HLE names
+    char ps5inc[1100];                       // (WSword) the console's libc headers, "" = none (no PS5 export)
 #ifdef _WIN32
     char implib[1100];  // the .exe's import library (the runtime functions the game code calls)
     char zig_rt[1100];  // the release's zig: its runtime built ahead of time (zig/rt, tools/zig_slim.sh), "" = none
@@ -143,6 +159,12 @@ static bool find_tools(Tools *t) {
     char *s = strrchr(t->inc, '/'), *b = strrchr(t->inc, '\\');
     if (b > s) s = b;
     if (s) *s = 0;
+    if (rt_resource("gamelib-src" SEP "ps5-include" SEP "math.h", "third_party/ps5-include/math.h", t->ps5inc,
+                    sizeof t->ps5inc)) {
+        char *s2 = strrchr(t->ps5inc, '/'), *b2 = strrchr(t->ps5inc, '\\');
+        if (b2 > s2) s2 = b2;
+        if (s2) *s2 = 0;
+    }
 #ifdef _WIN32
     if (!rt_resource("WSword.dll.a", "build/WSword.dll.a", t->implib, sizeof t->implib)) return false;
     t->zig_rt[0] = 0;
@@ -164,6 +186,12 @@ bool gamebuild_available(void) {
 static void compiler(Args *a, const Tools *t) {
     add(a, t->cc);
     if (t->zig) add(a, "cc");
+    if (g_ps5) {  // (the console: its target, nothing of zig's libc; the console's headers in add_cflags)
+        if (t->zig) { add(a, "-target"); add(a, PS5_ZIG_TARGET); }
+        else { add(a, "-target"); add(a, "x86_64-unknown-linux-gnu"); add(a, "-fuse-ld=lld"); }
+        add(a, "-nostdlib");
+        return;
+    }
 #ifdef __linux__
     // zig's own glibc headers and stubs (lib/libc, tools/fetch_zig.sh keeps them), as old as the oldest glibc the
     // release runs on (docs/linux.md). Without a target it builds for the native libc and wants the system's headers,
@@ -302,6 +330,7 @@ static void add_unit(Units *us, const char *src, const char *work, const char *s
 // with its own CPU names (x86_64_v3) and takes "-<feature>" off the end, so x86-64-v3 would be CPU "x86": the same CPU
 // as -mcpu there.
 static const char *target_cflags(void) {
+    if (g_ps5) return GAMELIB_PS5_CFLAGS;
 #ifdef GAMELIB_CFLAGS_COMPAT
     if (gamelib_compat()) return GAMELIB_CFLAGS_COMPAT;
 #endif
@@ -321,7 +350,14 @@ static void add_cflags(Args *a, const Tools *t) {
             add(a, f);
         }
     }
-    if (t->zig) add_split(a, GAMELIB_ZIGFLAGS);  // (after them: the last -O that reaches clang wins)
+    if (t->zig) add_split(a, g_ps5 ? GAMELIB_PS5_ZIGFLAGS : GAMELIB_ZIGFLAGS);  // (after them: the last -O wins)
+    if (g_ps5) {  // the console's libc headers, not the PC's; position-independent (a shared object it loads)
+        add(a, "-nostdlibinc");
+        char inc[1200];
+        snprintf(inc, sizeof inc, "-isystem%s", t->ps5inc);
+        add(a, inc);
+        add(a, "-fPIC");
+    }
 }
 
 static PlatProc start_compile(const Tools *t, const Unit *u) {
@@ -332,7 +368,7 @@ static PlatProc start_compile(const Tools *t, const Unit *u) {
     snprintf(inc, sizeof inc, "-I%s", t->inc);
     add(&a, inc);
     char id[128];
-    snprintf(id, sizeof id, "-DGAMELIB_ID=\"%s\"", gamelib_id());
+    snprintf(id, sizeof id, "-DGAMELIB_ID=\"%s\"", g_ps5 ? GAMELIB_PS5_ID : gamelib_id());
     add(&a, id);
     add(&a, "-c");
     add(&a, u->src);
@@ -353,13 +389,25 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
         snprintf(why, why_size, "the game code builder is missing from this copy of WSword");
         return false;
     }
+    g_ps5 = o->ps5;
+    if (g_ps5 && !t.ps5inc[0]) {
+        snprintf(why, why_size, "the PS5's headers are missing from this copy of WSword");
+        return false;
+    }
     char work[1100], lib[1100], tmp[1100];
     snprintf(work, sizeof work, "%s" SEP ".gamebuild", game_dir);
-    snprintf(lib, sizeof lib, "%s" SEP "%s", game_dir, GAMELIB_NAME);
     snprintf(tmp, sizeof tmp, "%s" SEP "%s.tmp", work, GAMELIB_NAME);
     rt_remove_game_file(game_dir, ".gamebuild");
-    rt_remove_game_file(game_dir, GAMELIB_NAME);
-    rt_remove_game_file(game_dir, GAMELIB_NAME ".id");
+    if (g_ps5) {  // (the console's: in <data root>/PS5, beside the game files, for its title folder; the PC's stays)
+        char dir[1100];
+        snprintf(dir, sizeof dir, "%s" SEP GAMEBUILD_PS5_DIR, rt_data_root());
+        mkdir(dir, 0755);
+        snprintf(lib, sizeof lib, "%s" SEP "swgame.so", dir);
+    } else {
+        snprintf(lib, sizeof lib, "%s" SEP "%s", game_dir, GAMELIB_NAME);
+        rt_remove_game_file(game_dir, GAMELIB_NAME);
+        rt_remove_game_file(game_dir, GAMELIB_NAME ".id");
+    }
     mkdir(work, 0755);
     if (t.zig) {  // its caches in the work folder too (deleted below), not ~/.cache: hundreds of MB, used once
         char zc[1200];
@@ -374,7 +422,7 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
     }
     LOG("[gamebuild] generator %s%s%s, compiler %s%s, %d jobs\n", t.gen, t.gen_script[0] ? " " : "", t.gen_script,
         t.cc, t.zig ? " cc" : "", o->jobs);
-    LOG("[gamebuild] target%s: %s\n", gamelib_compat() ? " (compatible: no FMA instructions, slower)" : "",
+    LOG("[gamebuild] target%s: %s\n", g_ps5 ? " (the PS5)" : gamelib_compat() ? " (compatible: no FMA instructions, slower)" : "",
         target_cflags());
 
     // 1. the modules' layout (tools/layout.py): which modules, at which addresses
@@ -547,7 +595,7 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
         char at[1200];
         snprintf(at, sizeof at, "@%s", rsp);
 #ifdef _WIN32
-        if (t.zig_rt[0]) {  // the linker itself, with the runtime built ahead of time (its flags and libraries: link.rsp)
+        if (t.zig_rt[0] && !g_ps5) {  // the linker itself, with the runtime built ahead of time (its flags and libraries: link.rsp)
             char opt[1200];
             add(&a, t.cc);
             add(&a, "lld-link");
@@ -561,14 +609,21 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
             add(&a, t.implib);
         } else
 #endif
-        {
+        if (g_ps5 && t.zig) {  // the console's: lld itself (zig cc's link would build zig's runtime for the target from
+            add(&a, t.cc);     // sources the release's slim zig doesn't keep); the imports stay names (elfload.c)
+            add(&a, "ld.lld");
+            add(&a, "-shared");
+            add(&a, "-o");
+            add(&a, tmp);
+            add(&a, at);
+        } else {
             compiler(&a, &t);
             add_split(&a, GAMELIB_SHARED);
             add(&a, "-o");
             add(&a, tmp);
             add(&a, at);
 #ifdef _WIN32
-            add(&a, t.implib);
+            if (!g_ps5) add(&a, t.implib);  // (the console's: its imports stay names, bound when its title loads it)
 #endif
         }
         PlatProc p = f ? spawn(a.v, log) : 0;
@@ -587,7 +642,8 @@ bool gamebuild_run(const char *game_dir, const GameBuildOpts *o, char *why, size
         char idp[1100];
         snprintf(idp, sizeof idp, "%s.id", lib);
         FILE *f = NULL;
-        if (rename(tmp, lib) != 0 || !(f = fopen(idp, "wb")) || fprintf(f, "%s\n", gamelib_id()) < 0) {
+        if (rename(tmp, lib) != 0 || !(f = fopen(idp, "wb")) ||
+            fprintf(f, "%s\n", g_ps5 ? GAMELIB_PS5_ID : gamelib_id()) < 0) {
             snprintf(why, why_size, "the game code couldn't be saved");
             ok = false;
         }
