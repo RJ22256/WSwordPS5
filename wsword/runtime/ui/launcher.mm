@@ -124,7 +124,7 @@ static void save_png(id<MTLTexture> tex, const char *path) {
 
 // The version this build is (also names the release files; Makefile / tools/bundle_macos.sh / make_dmg.sh read it).
 // (WSword PC: its own version, and the Savage Wind Recomp release it is built on - SW_BASE_VERSION)
-#define SAVAGEWIND_VERSION "0.3.20-pc.1"
+#define SAVAGEWIND_VERSION "0.3.21-pc.1"
 #define SW_BASE_VERSION "0.4.1-alpha.4"
 #define SW_BASE_LINE " \xc2\xb7 Savage Wind Recomp " SW_BASE_VERSION  // (after the version, lower right)
 extern "C" const char *rt_version(void) { return SAVAGEWIND_VERSION; }  // (the title screen's version line: fs.c)
