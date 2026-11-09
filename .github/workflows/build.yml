@@ -17,6 +17,10 @@ on:
         description: "Release notes: a Markdown file in the repository"
         required: false
         default: ""
+      symbolize:
+        description: "Addresses from a console crash report to name in the log (space separated)"
+        required: false
+        default: ""
 
 jobs:
   ps5:
@@ -104,7 +108,7 @@ jobs:
         working-directory: WSwordPS5
         run: |
           rm -rf dist  # (the template's samples above: the toolchain's check, not released)
-          bash ps5/wsword/build.sh
+          WSWORD_SYMBOLIZE="${{ inputs.symbolize }}" bash ps5/wsword/build.sh
           sdk=$(bash ps5/tools/setup-sdk.sh)
           python3 ps5/wsword/missing.py --sdk "$sdk" build/wsword/libwsword.a build/wsword-deps/lib/*.a \
             | tee build/wsword/missing.txt >> "$GITHUB_STEP_SUMMARY"

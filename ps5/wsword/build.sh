@@ -49,3 +49,17 @@ cp "$w/third_party/lsfg-vk/LICENSE.md" "$app/lsfg-vk-LICENSE.md"
 cp "$w/third_party/FidelityFX/LICENSE.txt" "$app/FidelityFX-LICENSE.txt"
 rm -rf "$app/assets" "$app/shaders"  # (the template's samples' assets, not WSword's)
 echo "==> WSword $(cat "$w/VERSION") for the PS5: $app"
+# The eboot's symbols beside it (WSword.sym: address, kind, name), for the console's crash reports: their RIP and
+# backtrace are addresses in the title's image (the image's base as the report shows it, less its load address)
+elf=$work/link/llvm-pie.elf
+"$sdk/bin/llvm-nm" -n -C --defined-only "$elf" | grep -E ' [tTwW] ' > "$app/WSword.sym"
+readelf_tool=$(command -v llvm-readelf-18 || command -v llvm-readelf || echo readelf)
+"$readelf_tool" -lW "$elf" | grep -E "LOAD|Entry" || true
+# WSWORD_SYMBOLIZE: addresses (from a crash report) to name, as offsets in the image and as they are
+for a in ${WSWORD_SYMBOLIZE:-}; do
+    for off in "$a" $(printf '0x%x 0x%x' $((a - 0x400000)) $((a & 0xFFFFFFFF))); do
+        (( off >= 0 )) || continue
+        printf '%s (as %s): ' "$a" "$off"
+        awk -v t="$((off))" 'BEGIN{best=""} { v=strtonum("0x"$1); if (v<=t) { best=$0; bv=v } else exit } END{ if (best!="") printf "%s +0x%x\n", substr(best, 20), t-bv; else print "?" }' "$app/WSword.sym"
+    done
+done
