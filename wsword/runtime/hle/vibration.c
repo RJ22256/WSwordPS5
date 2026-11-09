@@ -84,6 +84,20 @@ void vibration_update(SDL_Gamepad *pad, bool focused) {
         failed = false;
     }
     if (!pad) return;
+#ifdef __PROSPERO__
+    {   // (the PS5: the DualSense's haptics play the HD rumble as it is - each Joy-Con's two bands, amplitude and
+        // frequency - on its own actuator; ps5/wsword/sdl/sdl_ps5.c. Without them, the two motors below.)
+        extern bool ps5_pad_haptics(const float v[8]);
+        float v[8] = {0, 160, 0, 320, 0, 160, 0, 320};
+        pthread_mutex_lock(&lock);
+        if (focused && permitted)
+            for (int i = 0; i < 2; i++)
+                v[4 * i] = values[i].low_amplitude, v[4 * i + 1] = values[i].low_frequency,
+                v[4 * i + 2] = values[i].high_amplitude, v[4 * i + 3] = values[i].high_frequency;
+        pthread_mutex_unlock(&lock);
+        if (ps5_pad_haptics(v)) return;
+    }
+#endif
     pthread_mutex_lock(&lock);
     uint16_t low = focused && permitted ? (uint16_t)lroundf(fmaxf(values[0].low_amplitude, values[1].low_amplitude) * 65535) : 0;
     uint16_t high = focused && permitted ? (uint16_t)lroundf(fmaxf(values[0].high_amplitude, values[1].high_amplitude) * 65535) : 0;

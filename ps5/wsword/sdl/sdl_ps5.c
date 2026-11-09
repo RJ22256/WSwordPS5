@@ -33,6 +33,9 @@ int scePadClose(int32_t handle);
 int scePadSetVibrationMode(int32_t handle, int32_t mode);
 int scePadSetVibration(int32_t handle, const void *vibration);
 int scePadSetMotionSensorState(int32_t handle, bool enable);
+int scePadSetLightBar(int32_t handle, const void *color);
+int scePadSetTriggerEffect(int32_t handle, const void *param);
+int sceAudioOutClose(int32_t port);
 int sceAudioOutInit(void);
 int sceAudioOutOpen(int32_t user, int32_t type, int32_t index, uint32_t grain, uint32_t rate, uint32_t format);
 int sceAudioOutOutput(int32_t port, const void *samples);
@@ -633,6 +636,150 @@ static void pad_start(void) {
     pthread_mutex_unlock(&g_pad_lock);
 }
 
+// ---- the DualSense's own: haptics, the light bar, the adaptive triggers, the touch pad's swipes
+// (runtime/hle/dualsense.c drives them through the ps5_pad_* calls below)
+
+// Haptics: the controller's two actuators driven as sound - its vibration audio port (sceAudioOut type 10, 48 kHz
+// S16 stereo, as PS5_RetroArch's input_ps5.cpp) in the pad's advanced vibration mode. The game's HD rumble (each
+// Joy-Con's low and high band: amplitude and frequency) is synthesised as it is: the left Joy-Con's on the left
+// actuator, the right's on the right. Without the port, the two motors as before (compatible mode).
+#define HAPTIC_RATE 48000
+#define HAPTIC_GRAIN 256
+static int32_t g_hap_port = -1;
+static pthread_t g_hap_thread;
+static bool g_hap_on;
+static float g_hap_target[8];  // left: low amp, low Hz, high amp, high Hz; right: the same (under g_pad_lock)
+static uint64_t g_hap_until;   // (the values stop counting: the game sends them each frame)
+
+static void *haptics_main(void *arg) {
+    (void)arg;
+    int16_t out[HAPTIC_GRAIN * 2];
+    double ph[4] = {0};
+    float cur[8] = {0, 160, 0, 320, 0, 160, 0, 320};
+    for (;;) {
+        float tgt[8];
+        pthread_mutex_lock(&g_pad_lock);
+        memcpy(tgt, g_hap_target, sizeof tgt);
+        bool live = ticks_ns() < g_hap_until;
+        int32_t port = g_hap_port;
+        pthread_mutex_unlock(&g_pad_lock);
+        if (port < 0) break;
+        if (!live) tgt[0] = tgt[2] = tgt[4] = tgt[6] = 0;
+        for (int i = 0; i < HAPTIC_GRAIN; i++) {
+            float t = (float)i / HAPTIC_GRAIN;
+            for (int c = 0; c < 2; c++) {
+                float *v = cur + 4 * c, *w = tgt + 4 * c, smp = 0;
+                for (int b = 0; b < 2; b++) {
+                    float amp = v[2 * b] + (w[2 * b] - v[2 * b]) * t;  // (eased across the grain: no clicks)
+                    float hz = w[2 * b + 1] > 20 && w[2 * b + 1] < 1300 ? w[2 * b + 1] : (b ? 320 : 160);
+                    ph[2 * c + b] += hz / HAPTIC_RATE;
+                    if (ph[2 * c + b] >= 1) ph[2 * c + b] -= 1;
+                    smp += amp * (float)sin(6.283185307 * ph[2 * c + b]);
+                }
+                smp *= 0.9f;
+                smp = smp > 1 ? 1 : smp < -1 ? -1 : smp;
+                out[2 * i + c] = (int16_t)(smp * 32000);
+            }
+        }
+        memcpy(cur, tgt, sizeof cur);
+        for (int b = 1; b < 8; b += 2) cur[b] = tgt[b];
+        if (sceAudioOutOutput(port, out) < 0) sleep_ns(5000000);
+    }
+    return NULL;
+}
+
+static void haptics_open_locked(int32_t h) {
+    if (g_hap_port < 0) {
+        sceAudioOutInit();
+        int port = sceAudioOutOpen(g_pad_user, 10, 0, HAPTIC_GRAIN, HAPTIC_RATE, 1);
+        if (port >= 0 && scePadSetVibrationMode(h, 1) >= 0) {
+            g_hap_port = port;
+            if (pthread_create(&g_hap_thread, NULL, haptics_main, NULL) != 0) {
+                sceAudioOutClose(port);
+                g_hap_port = -1;
+            }
+        } else if (port >= 0) sceAudioOutClose(port);
+        fprintf(stderr, "[ps5] pad: %s\n", g_hap_port >= 0 ? "haptics (the vibration audio port)" : "two-motor rumble");
+    } else scePadSetVibrationMode(h, 1);
+    g_hap_on = g_hap_port >= 0;
+    if (!g_hap_on) scePadSetVibrationMode(h, 2);  // (the two-motor rumble)
+}
+
+// The game's HD rumble now (runtime/hle/vibration.c); false: no haptics, the motors (SDL_RumbleGamepad) instead
+bool ps5_pad_haptics(const float v[8]) {
+    pthread_mutex_lock(&g_pad_lock);
+    bool on = g_hap_on;
+    if (on) memcpy(g_hap_target, v, sizeof g_hap_target), g_hap_until = ticks_ns() + 200000000u;
+    pthread_mutex_unlock(&g_pad_lock);
+    return on;
+}
+
+// The light bar and the triggers: what the runtime wants, sent when it changes (and to a new handle)
+static int32_t g_light_want = 0x0040ff, g_light_sent = -1, g_trig_want, g_trig_sent = -1;
+void ps5_pad_light(uint8_t r, uint8_t g, uint8_t b) {
+    pthread_mutex_lock(&g_pad_lock);
+    g_light_want = r << 16 | g << 8 | b;
+    pthread_mutex_unlock(&g_pad_lock);
+}
+// 0: the triggers free; 1: play (R2 a bow's draw - resistance to a click near the end; L2 a light, even resistance)
+void ps5_pad_triggers(int mode) {
+    pthread_mutex_lock(&g_pad_lock);
+    g_trig_want = mode;
+    pthread_mutex_unlock(&g_pad_lock);
+}
+// ScePadTriggerEffectParam: a mask (L2 1, R2 2), then a command for each (mode, 4 padding, 48 bytes of its parameters)
+typedef struct { uint32_t mode; uint8_t pad[4]; uint8_t data[48]; } TriggerCommand;
+typedef struct { uint8_t mask; uint8_t pad[7]; TriggerCommand cmd[2]; } TriggerParam;
+_Static_assert(sizeof(TriggerParam) == 120, "the trigger effect parameter is 120 bytes");
+static void dualsense_apply_locked(uint64_t now) {
+    static uint64_t next;
+    if (g_light_want != g_light_sent && now >= next) {  // (at most every 30 ms: a pulse is smooth enough)
+        uint8_t c[4] = {(uint8_t)(g_light_want >> 16), (uint8_t)(g_light_want >> 8), (uint8_t)g_light_want, 0};
+        if (scePadSetLightBar(g_pad_handle, c) >= 0) g_light_sent = g_light_want;
+        next = now + 30000000u;
+    }
+    if (g_trig_want != g_trig_sent) {
+        TriggerParam p = {.mask = 3};
+        if (g_trig_want == 1) {
+            p.cmd[0].mode = 1;                                 // L2: feedback - from position 2, strength 2 (of 8)
+            p.cmd[0].data[0] = 2, p.cmd[0].data[1] = 2;
+            p.cmd[1].mode = 2;                                 // R2: weapon - resistance from 2 to 7, strength 6
+            p.cmd[1].data[0] = 2, p.cmd[1].data[1] = 7, p.cmd[1].data[2] = 6;
+        }
+        int r = scePadSetTriggerEffect(g_pad_handle, &p);
+        if (g_trig_sent == -1 || r < 0) fprintf(stderr, "[ps5] pad: adaptive triggers %s: %d\n", g_trig_want ? "on" : "off", r);
+        g_trig_sent = g_trig_want;
+    }
+}
+
+// The touch pad: a swipe (a quick stroke across it, a finger's down to up) while the runtime says so (the pause menu)
+// presses L1 or R1 for 60 ms - the menu's page to the left or the right
+static bool g_swipe_on;
+static uint32_t g_swipe_held;
+static uint64_t g_swipe_until;
+void ps5_pad_swipes(bool on) {
+    pthread_mutex_lock(&g_pad_lock);
+    g_swipe_on = on;
+    pthread_mutex_unlock(&g_pad_lock);
+}
+static void touch_sample(const uint8_t t[24], uint64_t ts_us) {
+    static bool down;
+    static int x0, y0, x1, y1;
+    static uint64_t t0;
+    int n = t[0];
+    int x = t[8] | t[9] << 8, y = t[10] | t[11] << 8;
+    if (n > 0 && !down) down = true, x0 = x1 = x, y0 = y1 = y, t0 = ts_us;
+    else if (n > 0) x1 = x, y1 = y;
+    else if (down) {
+        down = false;
+        int dx = x1 - x0, dy = y1 - y0;
+        if (g_swipe_on && ts_us - t0 < 700000 && abs(dx) > 450 && abs(dx) > 2 * abs(dy)) {
+            g_swipe_held = 1u << (dx > 0 ? SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER : SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+            g_swipe_until = ticks_ns() + 60000000u;
+        }
+    }
+}
+
 static Sint16 stick(uint8_t v) { return (Sint16)(((int)v * 2 - 255) * 32767 / 255); }
 static Sint16 trigger(uint8_t v) { return (Sint16)((int)v * 32767 / 255); }
 
@@ -643,7 +790,8 @@ static void pad_open_locked(uint64_t now) {
     int h = scePadOpen(g_pad_user, 0, 0, NULL);
     if (h < 0) return;
     g_pad_handle = h;
-    scePadSetVibrationMode(h, 2);  // (the two-motor rumble; the other mode is the DualSense's haptics)
+    haptics_open_locked(h);
+    g_light_sent = g_trig_sent = -1;  // (the light bar and the triggers: set again on the new handle)
     if (g_pad_motion) scePadSetMotionSensorState(h, true);
     fprintf(stderr, "[ps5] pad: user %d's controller open (handle %d)\n", (int)g_pad_user, h);
     if (!g_pad_added) {
@@ -662,6 +810,8 @@ static void pad_read_locked(uint64_t now) {
         scePadSetVibration(g_pad_handle, off);
         g_rumbling = false;
     }
+    if (g_swipe_held && now >= g_swipe_until) g_swipe_held = 0;  // (the swipe's tab press: let go)
+    dualsense_apply_locked(now);
     PadSample s[64];
     int n = scePadRead(g_pad_handle, s, 64);
     g_pad_read_ns = now;
@@ -690,6 +840,8 @@ static void pad_read_locked(uint64_t now) {
                                          .value = axes[a]}};
                 push(&e);
             }
+        if (ours) touch_sample(s[i].touch, s[i].timestamp_us);
+        held |= g_swipe_held;
         g_held = held;
         memcpy(g_axes, axes, sizeof axes);
         if (g_pad_motion && ours) {

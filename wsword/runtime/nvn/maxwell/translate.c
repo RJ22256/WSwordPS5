@@ -2323,6 +2323,10 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         if (c->omap_depth) info->writes_depth = true;
         if (mvec_rt >= 0 && !mvec_mask && !mvec_still) sp(&s, "layout(location = 30) in vec4 mv_cur;\nlayout(location = 31) in vec4 mv_prev;\n");
         if (mvec_rt >= 0) sp(&s, "layout(location = %d) out vec4 mv_out;\n", mvec_rt);
+        // (alpha to coverage on a single-sampled target: NVIDIA's hardware dithers the coverage, which BOTW's dissolves
+        // rely on - Link warping, things fading out. Other GPUs cover all or nothing there, and the model vanished at
+        // once, in blocks. The pipeline sets this instead of alpha to coverage on those GPUs: vulkan/exec.c a2c_dither)
+        if ((c->omap_target & 0x8) && (!key || key->rt_kind[0] == 0)) sp(&s, "layout(constant_id = 200) const bool sw_a2c_dither = false;\n");
     } else {
         sp(&s, "layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;\n");
         if (c->uses_shared) sp(&s, "shared uint smem[%u];\n", c->smem_words);
@@ -2389,6 +2393,9 @@ static ShaderInfo *glsl_finish(Ctx *c, bool any_branch, bool dbg) {
         if (tint)
             sp(&s, "  if (ltint[0].w > 0.0f) { vec3 g = c0.rgb; float l = dot(g, vec3(0.299f, 0.587f, 0.114f));\n"
                    "    c0.rgb = mix(g, ltint[0].rgb * pow(l, ltint[1].w) + ltint[1].rgb * l, ltint[0].w); }\n");
+        if ((c->omap_target & 0x8) && (!key || key->rt_kind[0] == 0))  // (the 4x4 ordered dither of the coverage)
+            sp(&s, "  if (sw_a2c_dither) { const float bayer[16] = float[16](0.,8.,2.,10.,12.,4.,14.,6.,3.,11.,1.,9.,15.,7.,13.,5.);\n"
+                   "    ivec2 q = ivec2(gl_FragCoord.xy) & 3; if (clamp(c0.a, 0.0f, 1.0f) * 16.0f <= bayer[q.y * 4 + q.x]) discard; }\n");
         if (c->omap_depth) {
             if (c->reg_used[r + 1]) sp(&s, "  gl_FragDepth = as_f(r%d);\n", r + 1);
             else sp(&s, "  gl_FragDepth = gl_FragCoord.z;\n");

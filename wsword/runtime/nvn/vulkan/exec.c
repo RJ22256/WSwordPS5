@@ -2992,6 +2992,25 @@ static void cache_feedback(const VkPipelineCreationFeedback *fb) {
     vk_pipeline_cache_note(hit);
 }
 
+// Alpha to coverage on a single-sampled target, on GPUs that don't dither it (NVIDIA's does, as the Switch's): the
+// fragment shader's ordered dither instead (maxwell/translate.c sw_a2c_dither), alpha to coverage off. SAVAGEWIND_A2C_DITHER=0:
+// never, 1: on every GPU.
+static bool a2c_dither(bool a2c, uint32_t samples) {
+    static int mode = -2;
+    if (mode == -2) {
+        const char *e = getenv("SAVAGEWIND_A2C_DITHER");
+        mode = e ? atoi(e) : -1;
+    }
+    if (!a2c || samples > 1 || mode == 0) return false;
+    bool on = mode == 1 || g_vk.props.vendorID != 0x10DE;
+    static _Atomic int logged;
+    if (on && !atomic_exchange(&logged, 1)) LOG("[vk] alpha to coverage on a single-sampled target: dithered in the shader\n");
+    return on;
+}
+static const VkSpecializationMapEntry a2c_spec_entry = {200, 0, sizeof(VkBool32)};
+static const VkBool32 a2c_spec_true = VK_TRUE;
+static const VkSpecializationInfo a2c_spec = {1, &a2c_spec_entry, sizeof(VkBool32), &a2c_spec_true};
+
 static VkResult create_pipeline_in(const PipeState *k, VkShaderModule vsm, VkShaderModule fsm, VkPipelineLayout layout,
                                    VkPipelineCache cache, VkPipeline *out);
 static VkResult create_pipeline(const PipeState *k, VkShaderModule vsm, VkShaderModule fsm, VkPipelineLayout layout, VkPipeline *out) {
@@ -3026,8 +3045,11 @@ static VkResult create_pipeline_in(const PipeState *k, VkShaderModule vsm, VkSha
     VkPipelineRasterizationStateCreateInfo rs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
                                                  .depthClampEnable = k->depth_clamp && g_vk.depth_clamp,
                                                  .polygonMode = k->poly_fill ? VK_POLYGON_MODE_FILL : VK_POLYGON_MODE_LINE, .lineWidth = 1};
+    bool dither = a2c_dither(k->a2c, k->samples);
+    if (dither) stages[1].pSpecializationInfo = &a2c_spec;
     VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-                                               .rasterizationSamples = (VkSampleCountFlagBits)k->samples, .alphaToCoverageEnable = k->a2c};
+                                               .rasterizationSamples = (VkSampleCountFlagBits)k->samples,
+                                               .alphaToCoverageEnable = k->a2c && !dither};
     VkPipelineDepthStencilStateCreateInfo ds = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
     VkPipelineColorBlendAttachmentState cba[8] = {0};
     for (uint32_t i = 0; i < k->ncolor; i++) {
@@ -3155,9 +3177,11 @@ static VkPipeline gpl_shader_lib(VkShaderModule m, int stage, VkPipelineLayout l
         return gpl_create(&pi, VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT, cache, &p) == VK_SUCCESS ? p : VK_NULL_HANDLE;
     }
     VkPipelineDepthStencilStateCreateInfo ds = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+    bool dither = a2c_dither(variant & 1, 1u << (variant >> 1));
+    if (dither) st.pSpecializationInfo = &a2c_spec;
     VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
                                                .rasterizationSamples = (VkSampleCountFlagBits)(1u << (variant >> 1)),
-                                               .alphaToCoverageEnable = variant & 1};
+                                               .alphaToCoverageEnable = (variant & 1) && !dither};
     VkPipelineDynamicStateCreateInfo dy = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
                                            .dynamicStateCount = sizeof DYN_FS / sizeof DYN_FS[0], .pDynamicStates = DYN_FS};
     pi.pDepthStencilState = &ds;
@@ -3274,7 +3298,8 @@ static VkPipeline gpl_state_lib(const PipeState *s, bool output) {
         VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
                                                   .attachmentCount = k.ncolor, .pAttachments = cba};
         VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-                                                   .rasterizationSamples = (VkSampleCountFlagBits)k.samples, .alphaToCoverageEnable = k.a2c};
+                                                   .rasterizationSamples = (VkSampleCountFlagBits)k.samples,
+                                                   .alphaToCoverageEnable = k.a2c && !a2c_dither(k.a2c, k.samples)};
         VkPipelineDynamicStateCreateInfo dy = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
                                                .dynamicStateCount = sizeof DYN_OUT / sizeof DYN_OUT[0], .pDynamicStates = DYN_OUT};
         VkPipelineRenderingCreateInfo ri = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO, .colorAttachmentCount = k.ncolor,

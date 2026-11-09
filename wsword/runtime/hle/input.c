@@ -363,6 +363,9 @@ void input_mouse_update(SDL_Window *w) {
         recompute_keyboard();
     }
     vibration_update(pad, win_focused && !host_test);
+#ifdef __PROSPERO__
+    { extern void dualsense_frame(void); dualsense_frame(); }  // (the light bar, the triggers, the swipes: hle/dualsense.c)
+#endif
     static bool cur;
     pc_cursor_window(w);
     bool want = w && win_focused && g_settings.mouse_camera && !pc_cursor_active() && !menu_input_captured() && !menu_cursor_free() &&

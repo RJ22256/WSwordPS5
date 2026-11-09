@@ -214,6 +214,38 @@ static bool time_flags(float *now, uint64_t flags[2]) {
     return true;
 }
 
+// An s32 game data flag by name (CurrentHart, MaxHartValue...), as the game reads it now: GameDataMgr's current
+// buffer (the one whose flags are primaries: value at +0x18, name hash at +0x1c), its s32 array (count +0x18, array
+// +0x20). The flag's index is kept once found; each read checks its hash again. false: no world yet, or no such flag.
+bool game_flag_s32(const char *name, int32_t *out, int *slot) {
+    float *now = time_of_day();
+    uint64_t site = now ? time_data_site((uintptr_t)now - 0xb8) : 0, mgr = site ? read_pointer(site) : 0;
+    if (!mgr) return false;
+    uint32_t want = crc32_of(name);
+    for (int i = 0; i < 2; i++) {
+        uint64_t buffer = read_pointer(read_pointer(mgr + 0xbd8 + 8 * i));
+        uint32_t count;
+        if (!buffer || !control_mem_peek(buffer + 0x18, &count, sizeof count) || count > 100000) continue;
+        uint64_t array = read_pointer(buffer + 0x20);
+        if (!array) continue;
+        for (int pass = 0; pass < 2; pass++) {
+            uint32_t from = pass == 0 ? (uint32_t)(*slot >= 0 ? *slot : 0) : 0, to = pass == 0 && *slot >= 0 ? from + 1 : count;
+            for (uint32_t k = from; k < to && k < count; k++) {
+                uint64_t flag = read_pointer(array + 8 * k);
+                uint32_t hash, code;
+                uint64_t getter = flag ? read_pointer(read_pointer(flag) + 0x88) : 0;
+                if (!getter || !control_mem_peek(getter, &code, sizeof code) || code != 0xb9401800) break;  // (a proxy buffer)
+                if (!control_mem_peek(flag + 0x1c, &hash, sizeof hash) || hash != want) continue;
+                *slot = (int)k;
+                return control_mem_peek(flag + 0x18, out, sizeof *out);
+            }
+            if (*slot < 0) break;
+            *slot = -1;
+        }
+    }
+    return false;
+}
+
 static bool write_time(float *now, float tod) {
     uint64_t flags[2];
     if (!time_flags(now, flags)) return false;
