@@ -138,6 +138,7 @@ jobs:
           id=$(cat dist/PPSA99777/swgame-id.txt)
           prev=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=20" --jq '.[].body' |
                  sed -n 's/^PS5 game code id: `\([0-9a-f]*\)`.*/\1/p' | head -1)
+          [[ -n $prev ]] || prev=$(cat docs/releases/m4-game-code-id.txt)  # (v0.3.0-m4's, from before its notes said)
           { if [[ -n "$NOTES" && -f "$NOTES" ]]; then cat "$NOTES"; else echo "WSword PS5 $TAG"; fi
             echo
             echo "### Updating from an earlier WSword PS5"
