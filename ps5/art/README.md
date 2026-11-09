@@ -1,12 +1,25 @@
-# The home screen's artwork
+# The home screen: your icon, backgrounds and music
 
-The player's own WSword artwork (two looping videos, 1920x1080 and 600x900), as the PS5 home screen takes it. The home screen
-shows still pictures for a homebrew title, so these are frames of the videos:
+Everything the PS5 home screen shows for WSword comes from this folder. Each build turns it into the formats the
+console takes (`ps5/tools/home-screen.sh`, using PS5_Vulkan's `prepare-assets.sh`). Replace a file here with your own
+and build a release: GitHub > this folder > Add file > Upload files (same name, replacing it), then Actions > Build >
+Run workflow with a release name. Or copy the finished files straight to the console (below).
 
-- `background-source.png`: the 1920x1080 video's frame at 3 s. `ps5/sce_sys/pic0.dds` and `pic1.dds` are this scaled
-  to 3840x2160 and BC7-encoded: the backdrop while WSword is selected and while it starts.
-- `icon-source.png`: the 600x900 cover's frame at 3 s, fitted into 512x512 over the background's starry sky (its left
-  side, with no sword in it). `ps5/sce_sys/icon0.png` is this.
+| File here | What it is on the home screen | What it can be |
+|---|---|---|
+| `icon.png` | the app's tile | any image ffmpeg reads (PNG, JPG, WebP...), square: it becomes 512x512 |
+| `background.png` | the backdrop while WSword is selected | any image, 16:9: it becomes 3840x2160 |
+| `launch-background.png` | the backdrop while WSword starts (optional) | as above; without it, `background.png` again |
+| `music.at9` | the music while WSword is selected (optional) | ATRAC9, up to 87 s, 48 kHz stereo |
 
-Made again with PS5_Vulkan's `tools/prepare-assets.sh --icon ps5/art/icon-source.png --background ps5/art/background-source.png --output-directory ps5/sce_sys`
-(its pinned bc7enc_rdo; `tools/setup-asset-dependencies.sh` builds it).
+The icon is stretched to a square and the backgrounds to 16:9, so make them that shape (or fill the edges yourself).
+
+**Music** has to be ATRAC9 already. The PS5 plays nothing else there, and the only encoder is Sony's (the PlayStation
+SDK's `at9tool`, which can't run in these builds). A music.at9 you're entitled to use goes in as it is.
+
+**On the console directly** (no build): the finished files are in `/data/homebrew/PPSA99777/sce_sys/` - `icon0.png`
+(512x512 PNG), `pic0.dds` (selected) and `pic1.dds` (starting): 3840x2160 BC7 DDS, and `snd0.at9`. Replace them over
+FTP; the home screen may keep the old ones until the PS5 restarts.
+
+The shipped `icon.png` and `background.png` are frames of the player's WSword artwork videos (the cover fitted over
+the background's sky for the icon).

@@ -104,6 +104,11 @@ jobs:
           command -v nasm || sudo apt-get install -y -qq nasm
           sdk=$(bash ps5/tools/setup-sdk.sh)
           bash ps5/wsword/deps.sh "$sdk" build/wsword-deps ../PS5_Vulkan/.deps/native/zlib/root
+      - name: The home screen's icon, backgrounds and music (ps5/art)
+        working-directory: WSwordPS5
+        run: |
+          command -v ffmpeg || sudo apt-get install -y -qq ffmpeg
+          bash ps5/tools/home-screen.sh ../PS5_Vulkan
       - name: WSword as the title (eboot.bin)
         working-directory: WSwordPS5
         run: |
