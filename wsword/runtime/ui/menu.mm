@@ -782,7 +782,8 @@ static void tab_display(void) {
 #ifdef __PROSPERO__
         static const char *const mn[MODE_COUNT + 1] = {"Performance", "Quality", "Custom"};
         static const bool avail[MODE_COUNT + 1] = {true, true, false};
-        const char *md = "Both modes draw the game at 1440p (the TV gets 1440p, at 120 Hz where it takes it). "
+        const char *md = "Both modes draw the game at 1440p - on a 4K TV, AMD FSR scales it up to 4K (at 120 Hz where the TV takes it; "
+                         "with frame generation on, 120 Hz comes first: a TV with 120 Hz only at 1440p gets 1440p). "
                          "Performance: 60 fps - the game's own draw distance, sharper shadows. "
                          "Quality: 30 fps with Ray-Tracing (shadows, ambient occlusion, water reflections), High draw "
                          "distance and the sharpest shadows. With frame generation (below), Performance shows 120 on a "

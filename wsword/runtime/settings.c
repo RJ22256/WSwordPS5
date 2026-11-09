@@ -380,8 +380,8 @@ void settings_save(void) {
 // (the PS5) Both modes draw the game at 1440p, the TV's output (settings_ps5_output_height): the GPU has the room (about
 // a third busy at 1080p60 - the game's own thread on the CPU is the limit, not the pixels). Performance: 60 fps, the
 // game's own draw distance and the shadow maps one step up. Quality: 30 fps with Ray-Tracing (shadows, ambient
-// occlusion, water reflections), High draw distance and the biggest shadow maps. On an output taller than 1440p,
-// AMD FSR 3 scales the picture up to it; on a smaller one (a 1080p TV) the game draws at the output's own height.
+// occlusion, water reflections), High draw distance and the biggest shadow maps. On a 4K TV, AMD FSR scales the
+// 1440p picture up to 2160p (1.5x: FSR 1 on the console, FSR 3's upscaling being held back); on a smaller one (a 1080p TV) the game draws at its own height.
 static int g_ps5_out_h = 1440;
 static int g_ps5_hz = 60;  // the output's refresh rate: 120 where the TV takes the console's 119.88 Hz
 static void mode_into(Settings *s, int mode) {
@@ -406,9 +406,10 @@ static bool mode_matches(const Settings *p, const Settings *s) {
     return p->fps_limit == s->fps_limit && p->rt_shadows == s->rt_shadows && p->draw_distance == s->draw_distance &&
            p->shadow_res == s->shadow_res;
 }
-// The TV output to ask for at the start (vulkan/device.c, before the display surface): 1440p for every mode (the
-// nearest the TV has where it has no 1440p - ps5_sdl_want_output), at 120 Hz where the TV takes it
-int settings_ps5_output_height(void) { return 1440; }
+// The TV output to ask for at the start (vulkan/device.c, before the display surface): the TV's own - 4K where it has
+// it (the game drawn at 1440p, AMD FSR up to 2160p: mode_into), else the nearest below (1440p, 1080p) - at 120 Hz
+// where the TV takes it, before a bigger size when frame generation is on (ps5_sdl_want_refresh)
+int settings_ps5_output_height(void) { return 2160; }
 
 // The swapchain's height and the display's refresh rate (vulkan/device.c): the mode in use, if one, set again for them
 void settings_ps5_output(int height, double hz) {

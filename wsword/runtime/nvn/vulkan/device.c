@@ -2733,12 +2733,14 @@ void ui_window_init(void) {
     winsize_apply(window);
     create_instance();
 #ifdef __PROSPERO__
-    {   // (the PS5: the TV output the modes draw at - 1440p - so nothing is scaled on the console's GPU; the TV scales
-        // to its panel. WSwordPS5's SDL subset picks the display mode nearest it.)
+    {   // (the PS5: the TV's own resolution - 4K where it has it; the modes draw at 1440p and AMD FSR scales up to it
+        // (settings.c mode_into). WSwordPS5's SDL subset picks the display mode nearest it.)
         extern void ps5_sdl_want_output(int w, int h);
+        extern void ps5_sdl_want_refresh(bool high);
         extern int settings_ps5_output_height(void);
         int h = settings_ps5_output_height();
         ps5_sdl_want_output(h * 16 / 9, h);
+        ps5_sdl_want_refresh(g_settings.lsfg > 0 || g_settings.frame_gen);
     }
 #endif
     // (WSword) with NVIDIA DLSS frame generation, the surface through Streamline (dlssg.c), as its swapchain needs

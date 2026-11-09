@@ -344,10 +344,12 @@ char const *const *SDL_Vulkan_GetInstanceExtensions(Uint32 *count) {
     return ext;
 }
 
-// The output the runtime asks for before its display surface (runtime/nvn/vulkan/device.c: the mode's height,
-// 1080 for Performance, 1440 for Quality)
+// The output the runtime asks for before its display surface (runtime/nvn/vulkan/device.c: 2160 - the TV's own
+// resolution, 4K where it has it, the nearest below otherwise - with 120 Hz first when frame generation is on)
 static int g_want_w, g_want_h;
+static bool g_want_hi;  // a 120 Hz mode before a bigger one (frame generation on: its 60 shown as 120)
 void ps5_sdl_want_output(int w, int h) { g_want_w = w, g_want_h = h; }
+void ps5_sdl_want_refresh(bool high) { g_want_hi = high; }
 
 // Which display mode is better (SDL_Vulkan_CreateSurface): by size - nearest the window's when asked for one
 // (WSWORD_PS5_OUTPUT), else the largest up to 4K - then by the higher refresh rate.
@@ -358,6 +360,9 @@ static long mode_cost(const VkDisplayModeParametersKHR *p, bool sized, int w, in
 }
 static bool mode_better(const VkDisplayModeParametersKHR *a, const VkDisplayModeParametersKHR *b, bool sized, int w,
                         int h) {
+    // (frame generation on: 120 Hz first - a 4K TV that takes 120 Hz at 1440p only gets 1440p at 120, not 4K at 60)
+    bool ha = a->refreshRate >= 100000 && a->refreshRate <= 121000, hb = b->refreshRate >= 100000 && b->refreshRate <= 121000;
+    if (g_want_hi && ha != hb) return ha;
     long ca = mode_cost(a, sized, w, h), cb = mode_cost(b, sized, w, h);
     if (ca != cb) return ca < cb;
     // the higher refresh rate (119.88 Hz where the TV takes it: frame generation's 60 shown as 120; the game's own
