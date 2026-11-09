@@ -11,6 +11,7 @@ spaces. They ship next to the executable as `colour-luts/` (players' own LUTs go
 | `Savage_Wind.cube` | <https://freshluts.com/luts/219> | CINEMA 3 | Andy | 16³ |
 | `Dormant.cube` | <https://freshluts.com/luts/217> | CARIBE | Andy | 16³ |
 | `Ember.cube` | <https://freshluts.com/luts/107> | powerful cold | sagi hershkovich | 33³ |
+| `HDR_Look.cube` | (WSword's own, CC0: `tools`-free, made with a few lines of numpy) | - | WSword | 33³ |
 
 All three are made for Rec. 709 input, which is what BOTW's picture is. They were picked by eye on the Great Plateau
 (day and evening) from six CC0 candidates. Savage Wind is the recommended look: the first setup offers it (the start
@@ -21,3 +22,5 @@ softens the arc, and it looks best in the evening. Dormant is warm and golden wi
 other's names.) Left out: ROYALS (/luts/596: the daytime sky blows out to white), Cinematic/Forest
 (/luts/611) and KCTRK_222 (/luts/2705: strong cyan / yellow casts by day); and, before any test, LUTs whose uploader
 is not their author, that carry a brand name, or that expect camera log input.
+
+HDR Look is WSword's own: an SDR picture made to feel like HDR (deeper blacks, mid-tone contrast, brighter highlights, richer colour, the dull colours most). The PS5's menu has it as Video > HDR look.

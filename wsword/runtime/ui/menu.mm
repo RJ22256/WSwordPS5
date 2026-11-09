@@ -802,6 +802,22 @@ static void tab_display(void) {
         if (opt_choice_avail("Mode", &m, &shown, mn, avail, MODE_COUNT + 1, MODE_PERFORMANCE, md))
             settings_apply_mode(m);
     }
+#ifdef __PROSPERO__
+    {   // (the PS5) HDR look: the shipped HDR_Look LUT at full strength (third_party/luts) - an SDR picture made to feel
+        // like HDR; the console's own HDR output isn't open to a title like this one
+        static const char *k_hdr = "sw:HDR_Look.cube";
+        bool on = !strcmp(g_settings.color_lut, k_hdr);
+        if (opt_toggle("HDR look", &on, false,
+                       "Makes the picture feel like HDR on any TV: deeper blacks, more contrast in the mid-tones, brighter "
+                       "highlights and richer colour. (Real HDR output isn't available to WSword on the PS5, so this is "
+                       "a standard-range picture made to look like it. On an HDR TV, its own SDR-to-HDR or \"HDR "
+                       "effect\" setting adds to it.) Uses Colour > LUT, so it replaces any LUT chosen there.")) {
+            snprintf(g_settings.color_lut, sizeof g_settings.color_lut, "%s", on ? k_hdr : "");
+            if (on) g_settings.color_lut_strength = 100;
+            g_settings.color_lut_set = true;
+        }
+    }
+#endif
     opt_section("Display");
 #ifndef __PROSPERO__  // (the PS5: the TV is the screen - no window, monitor or window size)
     bool fs = g_settings.fullscreen;
