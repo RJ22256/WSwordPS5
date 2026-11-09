@@ -130,11 +130,16 @@ static ImGuiKey key_from_scancode(SDL_Scancode sc) {
     }
 }
 
-// Nintendo layout: the right face button (A) confirms, the bottom one (B) goes back.
+// The button bound to A confirms, the one bound to B goes back (by default the Nintendo layout: the right face button
+// confirms, the bottom one goes back; on the PS5 Cross and Circle, runtime/hle/bindings.c). So the menus follow the
+// game's own A and B, however they are bound.
 static ImGuiKey key_from_pad(Uint8 b) {
+    if (b == g_bind_pad[BIND_A]) return ImGuiKey_GamepadFaceDown;   // activate
+    if (b == g_bind_pad[BIND_B]) return ImGuiKey_GamepadFaceRight;  // cancel / back
+    // (A or B on a trigger, not a button: the face buttons of the default layout confirm and go back)
+    if (b == SDL_GAMEPAD_BUTTON_EAST && g_bind_pad[BIND_A] >= SDL_GAMEPAD_BUTTON_COUNT) return ImGuiKey_GamepadFaceDown;
+    if (b == SDL_GAMEPAD_BUTTON_SOUTH && g_bind_pad[BIND_B] >= SDL_GAMEPAD_BUTTON_COUNT) return ImGuiKey_GamepadFaceRight;
     switch (b) {
-    case SDL_GAMEPAD_BUTTON_EAST: return ImGuiKey_GamepadFaceDown;   // activate
-    case SDL_GAMEPAD_BUTTON_SOUTH: return ImGuiKey_GamepadFaceRight; // cancel / back
     case SDL_GAMEPAD_BUTTON_NORTH: return ImGuiKey_GamepadFaceUp;
     case SDL_GAMEPAD_BUTTON_WEST: return ImGuiKey_GamepadFaceLeft;
     case SDL_GAMEPAD_BUTTON_DPAD_UP: return ImGuiKey_GamepadDpadUp;

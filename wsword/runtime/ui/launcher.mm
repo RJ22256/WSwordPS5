@@ -1559,9 +1559,12 @@ static int glass_main(ImVec2 ds, SDL_Window *win, const std::string &status, boo
 // button (A) confirms, the bottom one (B) goes back; d-pad / left stick move. (ImGui's own SDL gamepad handling is
 // switched off: it used the Xbox layout and, per the user, didn't work on the start screen.)
 static ImGuiKey launcher_pad_key(Uint8 b) {
+    if (b == g_bind_pad[BIND_A]) return ImGuiKey_GamepadFaceDown;   // A: activate (where the game's A is bound;
+    if (b == g_bind_pad[BIND_B]) return ImGuiKey_GamepadFaceRight;  // B: back      Cross / Circle on the PS5)
+    // (A or B on a trigger, not a button: the face buttons of the default layout confirm and go back)
+    if (b == SDL_GAMEPAD_BUTTON_EAST && g_bind_pad[BIND_A] >= SDL_GAMEPAD_BUTTON_COUNT) return ImGuiKey_GamepadFaceDown;
+    if (b == SDL_GAMEPAD_BUTTON_SOUTH && g_bind_pad[BIND_B] >= SDL_GAMEPAD_BUTTON_COUNT) return ImGuiKey_GamepadFaceRight;
     switch (b) {
-    case SDL_GAMEPAD_BUTTON_EAST: return ImGuiKey_GamepadFaceDown;   // A: activate
-    case SDL_GAMEPAD_BUTTON_SOUTH: return ImGuiKey_GamepadFaceRight; // B: back
     case SDL_GAMEPAD_BUTTON_NORTH: return ImGuiKey_GamepadFaceUp;
     case SDL_GAMEPAD_BUTTON_WEST: return ImGuiKey_GamepadFaceLeft;
     case SDL_GAMEPAD_BUTTON_DPAD_UP: return ImGuiKey_GamepadDpadUp;
