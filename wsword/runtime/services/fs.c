@@ -22,6 +22,7 @@
 #include "../mods.h"
 #include "archive.h"
 #include "fs_layout.h"
+#include "../nvn/pad_illust.h"
 
 #define FS_PATH_NOT_FOUND MAKE_RESULT(2, 1)
 #define FS_PATH_EXISTS MAKE_RESULT(2, 2)
@@ -889,6 +890,13 @@ static void hud_letters_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz)
             nn += ln;
         }
     }
+#ifdef __PROSPERO__
+    if (!why) {  // (the controls screen's lines to the two-grip pad's buttons: nvn/pad_illust.c; in place, same size)
+        int pli = sarc_find(arc2, nn, "blyt/PaAllControllerTipsNN_00.bflyt", &adoff, &as, &ae);
+        int pe = pli >= 0 ? pad_illust_layout(arc2 + adoff + as, ae - as) : 0;
+        LOG("[fs] controls screen: %s\n", pe ? "lines led to the two-grip pad's buttons" : "the game's (layout not as expected)");
+    }
+#endif
     if (!why && panes != 12) why = "letters not as expected";
     if (why) {
         LOG("[fs] HUD letters: %s, the game's letters stay\n", why);
