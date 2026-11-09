@@ -1,2 +1,1 @@
-SheikahSlate 4a19f13633faec81782653bcbb10fadcedbb9644 (2026-11-09) PC: the PS5's TV output at each mode's own resolution (Performance 1080p, Quality 1440p: no 4K scaling on the console's GPU), and its CPU and GPU in the performance overlay
-with local changes
+SheikahSlate c8377326ac48ca2783db1cbd2c8e5f7c0dc7612d (2026-11-09) PC: the PS5 - a console menu, 1440p for both modes, frame generation's 120 on screen kept, Lossless lighter

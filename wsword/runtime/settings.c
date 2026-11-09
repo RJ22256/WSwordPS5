@@ -377,13 +377,12 @@ void settings_save(void) {
 // (WSword) the start screen's modes: Battery 30 fps, the game rendered smaller and AMD FSR 1 onto the window;
 // Performance 60, Turbo 120, Unlocked no limit - each at the window's full resolution
 #ifdef __PROSPERO__
-// (the PS5) Performance: 60 fps with the game drawn at 1080p, the game's own draw distance and the shadow maps one step
-// up - what the console holds at 60. Quality: 30 fps with the game drawn at 1440p, Ray-Tracing (shadows, ambient
-// occlusion, water reflections), High draw distance and the biggest shadow maps. On a TV
-// whose output is taller than that (WSword outputs the TV's highest, 4K where it can), AMD FSR 3 scales the picture up
-// to it: the output is the mode's own height when WSword starts (settings_ps5_output_height), so the upscaler only
-// runs after a switch of mode in play (Performance on a 1440p output: FSR from 1080p) until the next start.
-static int g_ps5_out_h = 1080;
+// (the PS5) Both modes draw the game at 1440p, the TV's output (settings_ps5_output_height): the GPU has the room (about
+// a third busy at 1080p60 - the game's own thread on the CPU is the limit, not the pixels). Performance: 60 fps, the
+// game's own draw distance and the shadow maps one step up. Quality: 30 fps with Ray-Tracing (shadows, ambient
+// occlusion, water reflections), High draw distance and the biggest shadow maps. On an output taller than 1440p,
+// AMD FSR 3 scales the picture up to it; on a smaller one (a 1080p TV) the game draws at the output's own height.
+static int g_ps5_out_h = 1440;
 static int g_ps5_hz = 60;  // the output's refresh rate: 120 where the TV takes the console's 119.88 Hz
 static void mode_into(Settings *s, int mode) {
     bool q = mode == MODE_QUALITY;
@@ -395,7 +394,7 @@ static void mode_into(Settings *s, int mode) {
     s->rt_shadows = q;
     s->draw_distance = q ? DRAWDIST_HIGH : DRAWDIST_ORIGINAL;  // (High, not Extreme+: the player found that buggy)
     s->shadow_res = q ? SHADOW_EXTREME : SHADOW_HIGH;
-    int target = q ? 1440 : 1080;
+    int target = g_ps5_out_h < 1440 ? g_ps5_out_h : 1440;
     double r = (double)g_ps5_out_h / target;
     extern bool upscaler_available(int u);  // (nvn/output_scale.c: FSR 3 where the GPU runs it, else FSR 1)
     s->upscaler = r <= 1.05 ? UPSCALE_OFF : upscaler_available(UPSCALE_FSR3) ? UPSCALE_FSR3 : UPSCALE_FSR1;
@@ -407,10 +406,9 @@ static bool mode_matches(const Settings *p, const Settings *s) {
     return p->fps_limit == s->fps_limit && p->rt_shadows == s->rt_shadows && p->draw_distance == s->draw_distance &&
            p->shadow_res == s->shadow_res;
 }
-// The TV output to ask for at the start (vulkan/device.c, before the display surface): the mode's own height, 1440 for
-// Quality and 1080 for Performance (and for Custom); a mode chosen later draws at it on the output there is, and the
-// output follows at the next start.
-int settings_ps5_output_height(void) { return settings_current_mode() == MODE_QUALITY ? 1440 : 1080; }
+// The TV output to ask for at the start (vulkan/device.c, before the display surface): 1440p for every mode (the
+// nearest the TV has where it has no 1440p - ps5_sdl_want_output), at 120 Hz where the TV takes it
+int settings_ps5_output_height(void) { return 1440; }
 
 // The swapchain's height and the display's refresh rate (vulkan/device.c): the mode in use, if one, set again for them
 void settings_ps5_output(int height, double hz) {
@@ -422,7 +420,7 @@ void settings_ps5_output(int height, double hz) {
         mode_into(&g_settings, m);
         fprintf(stderr, "[mode] %s on a %dp %d Hz output: drawn at %dp%s, %d fps on screen\n",
                 m == MODE_QUALITY ? "Quality" : "Performance", height, ihz,
-                m == MODE_QUALITY ? (height < 1440 ? height : 1440) : (height < 1080 ? height : 1080),
+                height < 1440 ? height : 1440,
                 g_settings.upscaler == UPSCALE_FSR3 ? ", AMD FSR 3 up to the output"
                 : g_settings.upscaler == UPSCALE_FSR1 ? ", AMD FSR 1 up to the output" : "", g_settings.fps_limit);
     }

@@ -782,11 +782,11 @@ static void tab_display(void) {
 #ifdef __PROSPERO__
         static const char *const mn[MODE_COUNT + 1] = {"Performance", "Quality", "Custom"};
         static const bool avail[MODE_COUNT + 1] = {true, true, false};
-        const char *md = "Performance: 60 fps, the game drawn at 1080p - the game's own draw distance, sharper shadows. "
-                         "Quality: 30 fps, the game drawn at 1440p, with Ray-Tracing (shadows, ambient occlusion, water "
-                         "reflections), High draw distance and the sharpest shadows. The TV gets each mode's own "
-                         "resolution. With frame generation (below), Performance shows 120 on a 120 Hz TV and Quality "
-                         "60. Custom: your own settings below.";
+        const char *md = "Both modes draw the game at 1440p (the TV gets 1440p, at 120 Hz where it takes it). "
+                         "Performance: 60 fps - the game's own draw distance, sharper shadows. "
+                         "Quality: 30 fps with Ray-Tracing (shadows, ambient occlusion, water reflections), High draw "
+                         "distance and the sharpest shadows. With frame generation (below), Performance shows 120 on a "
+                         "120 Hz TV and Quality 60. Custom: your own settings below.";
 #else
         static const char *const mn[MODE_COUNT + 1] = {"Battery", "Performance", "Turbo", "Unlocked", "Custom"};
         static const bool avail[MODE_COUNT + 1] = {true, true, true, true, false};
@@ -802,6 +802,7 @@ static void tab_display(void) {
             settings_apply_mode(m);
     }
     opt_section("Display");
+#ifndef __PROSPERO__  // (the PS5: the TV is the screen - no window, monitor or window size)
     bool fs = g_settings.fullscreen;
     if (opt_toggle("Fullscreen", &fs, false, "Fills the screen. Also: F11, Alt+Enter or Cmd+Ctrl+F.")) {
         g_settings.fullscreen = fs;
@@ -878,6 +879,7 @@ static void tab_display(void) {
                        "16:9."))
             g_settings.wide_view = wv;
     }
+#endif
     {   // Field of view (runtime/nvn/output_scale.c rt_persp)
         static const int fov[] = FOV_CHOICES;
         enum { NV = sizeof fov / sizeof fov[0] };
@@ -931,6 +933,7 @@ static void tab_display(void) {
         }
         if (opt_choice("Frame rate", &cur, names, NF, def, desc.c_str(), false)) g_settings.fps_limit = fps[cur];
     }
+#ifndef __PROSPERO__  // (the PS5: synchronised by the console, each mode's own pacing)
     {   // VSync (settings.h VSYNC_*: runtime/nvn/vulkan/device.c, runtime/hle/framepace.c)
         static const char *const names[VSYNC_COUNT] = {"On", "Fast", "Adaptive", "Off"};
         std::string desc = tr("On: no tearing; the game waits for the display. With G-SYNC or FreeSync the display "
@@ -948,6 +951,8 @@ static void tab_display(void) {
         }
         opt_choice("VSync", &g_settings.vsync, names, VSYNC_COUNT, VSYNC_DEFAULT, desc.c_str(), false);
     }
+#endif
+#ifndef __PROSPERO__  // (the PS5: SDR for now)
     {   // HDR (settings.h HDR_*: runtime/nvn/vulkan/device.c hdr_wanted)
         static const char *const names[HDR_COUNT] = {"Automatic", "On", "Off"};
         opt_choice("HDR", &g_settings.hdr, names, HDR_COUNT, HDR_AUTO,
@@ -956,12 +961,14 @@ static void tab_display(void) {
                    "display takes it. Off: always SDR. White follows Windows' SDR content brightness (Settings > System > "
                    "Display > HDR).", false);
     }
+#endif
     static const char *const perf_names[] = {"Off", "FPS", "Full"};
     opt_choice("Performance overlay", &g_settings.perf_overlay, perf_names, 3, PERF_OFF,
                "FPS: the frame rate and frame time. Full: also CPU, memory and GPU load and temperatures, a "
                "frame time graph and Link's coordinates. F10 switches between them while you play.");
 
     opt_section("Rendering");
+#ifndef __PROSPERO__  // (the PS5: each mode sets the resolution - Display > Mode)
     {   // Upscaler: Off, this OS's spatial upscaler (its modes on the row below), and the temporal ones still to come.
         // Values that can't be picked yet are shown greyed ("coming soon"); stepping onto them keeps the one in use.
         // The modes wait for render-target scaling (upscale_modes_available): until then the upscaler brings the
@@ -1056,6 +1063,7 @@ static void tab_display(void) {
 #endif
         opt_indent(-1);
     }
+#endif
 #ifdef __APPLE__
     static const char *aa[] = {"Off", "SMAA"};
     opt_choice("Anti-aliasing", &g_settings.antialias, aa, 2, AA_OFF,
@@ -1151,10 +1159,17 @@ static void tab_display(void) {
             int fl = g_settings.lsfg_flow > 0 ? g_settings.lsfg_flow : 20;
             if (!g_settings.lsfg) opt_disable_next();
             if (opt_int("Flow scale", &fl, 20, 100, 5, 20, "%d%%",
+#ifdef __PROSPERO__
+                        "Lossless: the resolution motion is found at, as a share of the game's image - most of frame "
+                        "generation's GPU time. Automatic: about 540 lines of motion (50% at 1080p, 40% at 1440p), what "
+                        "leaves the console's GPU the time the game needs for 60. Higher: motion found more finely, at "
+                        "the cost of the game's own frame rate.",
+#else
                         "Lossless: the resolution motion is found at, as a share of the game's image - most of frame "
                         "generation's GPU time. Automatic: Lossless Scaling's own advice by the image's height, about 1080 "
                         "lines of motion (100% at 1080 lines, 75% at 1440, 50% at 2160 - 4K). Lower: less GPU time, motion "
                         "found less finely (thin things can wobble); higher than Automatic costs more for little you'd see.",
+#endif
                         "Automatic"))
                 g_settings.lsfg_flow = fl <= 20 ? 0 : fl;
         }
@@ -1163,6 +1178,7 @@ static void tab_display(void) {
                    "Lossless: Lossless Scaling's lighter passes - much less GPU time, the frames in between slightly less "
                    "accurate. Turn it on if the game's own frame rate drops with Lossless on.");
     }
+#ifndef __PROSPERO__  // (no ReShade on the console)
     {   // (WSword) the player's own ReShade, loaded by WSword (vulkan/reshade.c): from the next start
         opt_section("ReShade");
         char st[600];
@@ -1183,6 +1199,7 @@ static void tab_display(void) {
         if (!g_settings.reshade) opt_disable_next();
         if (opt_choice("ReShade depth", &dv, dn, 2, 0, dd.c_str(), false)) g_settings.reshade_own_depth = dv == 1;
     }
+#endif
     tab_colour();
 #endif
     opt_end();
@@ -1271,6 +1288,7 @@ static void tab_about(void) {
     toggle("D-pad as left stick", &g_settings.dpad_move);
     hint("The d-pad (and the arrow keys) also move like the left stick while the stick is at rest.");
     ImGui::Spacing();
+#ifndef __PROSPERO__  // (the PS5: no mouse)
     header("Mouse");
     opt_toggle("PC mouse pointer", &g_settings.pc_cursor, true,
                "Point and click in menus and map. Esc pauses/goes back; F2 frees the cursor.");
@@ -1285,13 +1303,19 @@ static void tab_about(void) {
         g_settings.mouse_sens_y = sens_y / 100.0f;
     toggle("Invert mouse Y", &g_settings.mouse_invert_y);
     ImGui::Spacing();
+#endif
     header("Controls");
     controls_bindings_draw(ImGui::GetFontSize() / 34);
     ImGui::Spacing();
     header("Menu");
+#ifdef __PROSPERO__
+    ImGui::TextUnformatted(tr("Open / close this menu:  the touch pad + OPTIONS"));
+    ImGui::TextUnformatted(tr("Switch tabs:  L1 / R1        Choose:  Cross        Back:  Circle"));
+#else
     ImGui::TextUnformatted(tr("Open / close this menu:  F1, Esc, the controller's Home / Xbox / PlayStation button, or Back + Start"));
     ImGui::TextUnformatted(tr("Switch tabs:  L / R  (Q / E)        Back:  B  (Esc)"));
     ImGui::TextUnformatted(tr("Fullscreen:  F11 / Alt+Enter"));
+#endif
 }
 
 // Reboot (runtime/main.c): the game is gone - menu and name dialog close; the ImGui context stays.
@@ -1734,7 +1758,132 @@ static void quick_toggles(ImDrawList *dl, ImVec2 a, ImVec2 b, float scale) {
     }
 }
 
+#ifdef __PROSPERO__
+// (the PS5) The in-game menu as a console's: the whole screen, the pages as a row of tabs across the top between L1 and
+// R1, the open page below at the full width, and the buttons' prompts along the foot - Cross choose, Circle back, L1 /
+// R1 tabs, touch pad + OPTIONS close. Drawn with the console's own button shapes.
+static void ps_glyph(ImDrawList *dl, ImVec2 c, float r, int kind, float scale) {  // 0 cross, 1 circle, 2 square, 3 triangle
+    const ImU32 col = IM_COL32(236, 242, 248, 255);
+    float w = 2.2f * scale, k = r * 0.55f;
+    dl->AddCircle(c, r, IM_COL32(236, 242, 248, 110), 32, 1.4f * scale);
+    if (kind == 0) {
+        dl->AddLine(ImVec2(c.x - k, c.y - k), ImVec2(c.x + k, c.y + k), col, w);
+        dl->AddLine(ImVec2(c.x - k, c.y + k), ImVec2(c.x + k, c.y - k), col, w);
+    } else if (kind == 1) dl->AddCircle(c, k, col, 24, w);
+    else if (kind == 2) dl->AddRect(ImVec2(c.x - k * 0.85f, c.y - k * 0.85f), ImVec2(c.x + k * 0.85f, c.y + k * 0.85f), col, 0, 0, w);
+    else dl->AddTriangle(ImVec2(c.x, c.y - k), ImVec2(c.x - k, c.y + k * 0.7f), ImVec2(c.x + k, c.y + k * 0.7f), col, w);
+}
+static float ps_pill(ImDrawList *dl, ImVec2 a, float h, const char *text, float scale) {  // L1 / R1 / OPTIONS; its width
+    float fs = h * 0.62f, tw = ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0, text).x, w = tw + h * 0.9f;
+    dl->AddRect(a, ImVec2(a.x + w, a.y + h), IM_COL32(236, 242, 248, 200), h * 0.3f, 0, 1.6f * scale);
+    dl->AddText(ImGui::GetFont(), fs, ImVec2(a.x + (w - tw) * 0.5f, a.y + (h - fs) * 0.5f - 1 * scale),
+                IM_COL32(236, 242, 248, 255), text);
+    return w;
+}
+static void console_prompts(ImDrawList *dl, ImVec2 a, ImVec2 b, float scale) {
+    float h = b.y - a.y, fs = ImGui::GetFontSize() * 0.8f, r = h * 0.3f, x = b.x;
+    const ImU32 txt = IM_COL32(214, 226, 238, 255);
+    struct { int glyph; const char *pill, *label; } items[] = {
+        {-1, "TOUCH PAD + OPTIONS", "Close"}, {-1, "L1 / R1", "Tabs"}, {1, NULL, "Back"}, {0, NULL, "Choose"}};
+    for (auto &it : items) {  // (from the right)
+        const char *l = tr(it.label);
+        float lw = ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0, l).x;
+        x -= lw;
+        dl->AddText(ImGui::GetFont(), fs, ImVec2(x, a.y + (h - fs) * 0.5f), txt, l);
+        x -= 10 * scale;
+        if (it.glyph >= 0) {
+            x -= r;
+            ps_glyph(dl, ImVec2(x, a.y + h * 0.5f), r, it.glyph, scale);
+            x -= r;
+        } else {
+            float ph = h * 0.62f, pw = ImGui::GetFont()->CalcTextSizeA(ph * 0.62f, FLT_MAX, 0, it.pill).x + ph * 0.9f;
+            x -= pw;
+            ps_pill(dl, ImVec2(x, a.y + (h - ph) * 0.5f), ph, it.pill, scale);
+        }
+        x -= 34 * scale;
+    }
+}
+
+static void console_tabs_body(float scale, bool in_game) {
+    struct Tab { const char *name; int id; };
+    static const Tab all[] = {{"Video", 0}, {"Audio", 1}, {"Controls", 8}, {"Language", 2}, {"Mods", 4}, {"Quit", 9}};
+    const int ntabs = sizeof all / sizeof *all;
+    if (g_tab_request_ext >= 0) { g_tab_request = g_tab_request_ext; g_tab_request_ext = -1; }
+    for (int i = 0; i < ntabs; i++) if (all[i].id == g_tab_request) g_tab = all[i].id;
+    int index = 0;
+    bool found = false;
+    for (int i = 0; i < ntabs; i++) if (all[i].id == g_tab) index = i, found = true;
+    if (!found) g_tab = all[0].id, index = 0;
+    if (!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) && !ui_text_busy()) {
+        int step = ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) ? 1 : ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) ? -1 : 0;
+        if (step) {
+            index = (index + step + ntabs) % ntabs;
+            g_tab = all[index].id;
+            g_focus_tab = g_tab, g_focus_frames = 0;  // (the new page's first option takes the focus)
+        }
+    }
+    const ImU32 ink = IM_COL32(240, 246, 252, 255), dim = IM_COL32(150, 168, 186, 255), cyan = IM_COL32(94, 230, 245, 255),
+                rule = IM_COL32(60, 82, 106, 255);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2 p = ImGui::GetCursorScreenPos(), avail = ImGui::GetContentRegionAvail();
+    float fs = ImGui::GetFontSize(), top_h = 84 * scale, foot_h = 64 * scale;
+    // the tabs between L1 and R1, centred; the open one bright, underlined
+    {
+        float ph = 40 * scale, gapx = 44 * scale, tsz = fs * 1.05f, total = 0;
+        float widths[8];
+        for (int i = 0; i < ntabs; i++) widths[i] = ImGui::GetFont()->CalcTextSizeA(tsz, FLT_MAX, 0, tr(all[i].name)).x, total += widths[i];
+        total += gapx * (ntabs - 1);
+        float l1w = ImGui::GetFont()->CalcTextSizeA(ph * 0.62f, FLT_MAX, 0, "L1").x + ph * 0.9f;
+        float x = p.x + (avail.x - total) * 0.5f, cy = p.y + top_h * 0.5f;
+        ps_pill(dl, ImVec2(x - gapx - l1w, cy - ph * 0.5f), ph, "L1", scale);
+        for (int i = 0; i < ntabs; i++) {
+            bool open = all[i].id == g_tab;
+            dl->AddText(ImGui::GetFont(), tsz, ImVec2(x, cy - tsz * 0.55f), open ? ink : dim, tr(all[i].name));
+            if (open) dl->AddRectFilled(ImVec2(x, cy + tsz * 0.62f), ImVec2(x + widths[i], cy + tsz * 0.62f + 4 * scale), cyan, 2 * scale);
+            x += widths[i] + gapx;
+        }
+        ps_pill(dl, ImVec2(x - gapx + gapx, cy - ph * 0.5f), ph, "R1", scale);
+        dl->AddLine(ImVec2(p.x, p.y + top_h), ImVec2(p.x + avail.x, p.y + top_h), rule, 1.4f * scale);
+        if (in_game) quick_toggles(dl, ImVec2(p.x + avail.x - 420 * scale, p.y), ImVec2(p.x + avail.x, p.y + top_h * 0.9f), scale);
+    }
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + top_h + 14 * scale));
+    // the open page, the full width (narrowed for reading on a TV: 1500 px at 1080p)
+    float page_w = fminf(avail.x, 1500 * scale), page_x = p.x + (avail.x - page_w) * 0.5f;
+    ImGui::SetCursorScreenPos(ImVec2(page_x, p.y + top_h + 14 * scale));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
+    ImGui::BeginChild("##page", ImVec2(page_w, avail.y - top_h - foot_h - 28 * scale), ImGuiChildFlags_None,
+                      ImGuiWindowFlags_NavFlattened);
+    ImGui::PopStyleColor();
+    if (g_focus_tab == g_tab || g_focus_tab == -100 || g_focus_tab == -1) {  // (a few frames: the page's first option)
+        ImGui::SetKeyboardFocusHere();
+        ImGui::SetNavCursorVisible(true);
+        if (++g_focus_frames >= 4) g_focus_tab = -99, g_focus_frames = 0;
+    }
+    ImGui::PushID(g_tab);
+    switch (g_tab) {
+    case 0: tab_display(); break;
+    case 1: tab_audio(); break;
+    case 2: tab_language(in_game); break;
+    case 4: mods_tab_draw(ImGui::GetFontSize() / 34, in_game); break;
+    case 8: tab_about(); break;
+    case 9: tab_quit(scale, in_game); break;
+    }
+    ImGui::PopID();
+    ImGui::EndChild();
+    // the buttons' prompts along the foot
+    float fy = p.y + avail.y - foot_h;
+    dl->AddLine(ImVec2(p.x, fy - 8 * scale), ImVec2(p.x + avail.x, fy - 8 * scale), rule, 1.4f * scale);
+    console_prompts(dl, ImVec2(p.x, fy), ImVec2(p.x + avail.x - 8 * scale, fy + foot_h), scale);
+    dl->AddText(g_font_big, g_font_big->FontSize * ImGui::GetIO().FontGlobalScale * 0.55f, ImVec2(p.x + 6 * scale, fy + 10 * scale),
+                IM_COL32(143, 217, 230, 255), "WSword");
+    g_tab_request = -2;
+}
+#endif
+
 static void tabs_body(float scale, bool in_game, void (*prelaunch)(float)) {
+#ifdef __PROSPERO__
+    if (!prelaunch) { console_tabs_body(scale, in_game); return; }  // (the PS5: the console's layout)
+#endif
     // (id: the page; -1 = Files, the start screen's first)
     struct Tab { const char *name; int id; bool on; };
     Tab tabs[11];
@@ -1974,6 +2123,9 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     drain_events(io);
     // fonts are built at 34/56 px for a ~1080 px tall output; scale to the window
     float scale = (float)(th / 1080.0);
+#ifdef __PROSPERO__
+    scale *= 1.15f;  // (the PS5: read from the sofa)
+#endif
     if (scale < 0.45f) scale = 0.45f;
     io.FontGlobalScale = scale;
 
@@ -2015,14 +2167,27 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
 
     if (open) {
         // dim the game behind the menu
+#ifdef __PROSPERO__
+        ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(4, 10, 20, 170));
+#else
         ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 110));
+#endif
         // (WSword's Glass Slate look, as the start screen's Settings: the rail of pages with its title and BACK -
         // tabs_body - in a navy glass window over most of the screen; B / Esc close it too)
+#ifdef __PROSPERO__
+        float w = io.DisplaySize.x, h = io.DisplaySize.y;  // (the PS5: the whole screen, as a console's menu)
+#else
         float w = io.DisplaySize.x * 0.94f, h = io.DisplaySize.y - 2 * 18 * scale;  // (all the height: a slim margin)
+#endif
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
         ImGui::SetNextWindowSize(ImVec2(w, h), ImGuiCond_Always);
+#ifdef __PROSPERO__
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(64 * scale, 40 * scale));  // (TV-safe margins)
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+#else
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(28 * scale, 24 * scale));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 22 * scale);
+#endif
         ImGui::Begin("##menu", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
         ImGui::PopStyleVar(2);
         ImFont *keep_big = g_font_big;  // (the window in the menu's font; header() uses g_font_big)

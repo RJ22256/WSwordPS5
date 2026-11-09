@@ -1270,8 +1270,11 @@ static void create_swapchain(void) {
         ext.width, ext.height, count, present_mode_name(mode), present_mode_name(wanted_present_mode()), modes, kind,
         winsize_refresh_rate());
 #ifdef __PROSPERO__
-    {   // (the PS5: the modes' render heights follow the TV's - settings.c settings_ps5_output)
+    {   // (the PS5: the modes' render heights follow the TV's - settings.c settings_ps5_output. The display mode is the
+        // one the surface picked - 119.88 Hz where the TV takes it - read again here: the reading from before the
+        // surface was the console's 60 Hz default, and frame generation's 120 on screen was capped to 60 by it)
         extern void settings_ps5_output(int height, double hz);
+        winsize_refresh(NULL);
         settings_ps5_output((int)ext.height, winsize_refresh_rate());
     }
 #endif
@@ -2047,7 +2050,13 @@ static int lsfg_setting(void) {  // the frames made between two of the game's: 1
 // about 1080 lines of motion (100% at 1080 lines, 75% at 1440, 50% at 2160), in steps of 5
 static int lsfg_flow_for(uint32_t height) {
     int f = g_settings.lsfg_flow;
+#ifdef __PROSPERO__
+    // (the console: about 540 lines of motion - 50% at 1080p, 40% at 1440p. At Lossless Scaling's 1080 its passes
+    // took the GPU time the game needed, and the game fell from 60 to about 38 with it on)
+    if (f <= 0) f = height ? (int)lround(540.0 * 100 / height / 5) * 5 : 50;
+#else
     if (f <= 0) f = height ? (int)lround(1080.0 * 100 / height / 5) * 5 : 100;
+#endif
     return f < 25 ? 25 : f > 100 ? 100 : f;
 }
 
@@ -2716,8 +2725,8 @@ void ui_window_init(void) {
     winsize_apply(window);
     create_instance();
 #ifdef __PROSPERO__
-    {   // (the PS5: the TV output each mode draws at - 1080p for Performance, 1440p for Quality - so nothing is scaled
-        // on the console's GPU; the TV scales to its panel. WSwordPS5's SDL subset picks the display mode nearest it.)
+    {   // (the PS5: the TV output the modes draw at - 1440p - so nothing is scaled on the console's GPU; the TV scales
+        // to its panel. WSwordPS5's SDL subset picks the display mode nearest it.)
         extern void ps5_sdl_want_output(int w, int h);
         extern int settings_ps5_output_height(void);
         int h = settings_ps5_output_height();
