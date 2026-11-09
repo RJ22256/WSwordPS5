@@ -26,9 +26,9 @@ jobs:
           "${cc[@]}" -c ps5/wsword/test/export_probe.c -o probe.o
           "${cc[@]}" '-DGAMELIB_ID="probe"' -c wsword/tools/gamelib_entry.c -o entry.o
           zig/zig ld.lld -shared -o swgame.so probe.o entry.o
-          llvm-readelf -hd --dyn-syms swgame.so | grep -E "Type:|Machine|NEEDED|UND|GLOBAL" | head -30
+          readelf -hd --dyn-syms swgame.so | grep -E "Type:|Machine|NEEDED|UND|GLOBAL" | head -30
           objdump -d probe.o | grep -c sqrtss && echo "sqrtf inlined"
       - name: Load it (runtime/elfload.c)
         run: |
-          cc -DELFLOAD_TEST -O1 -Iwsword/runtime ps5/wsword/test/export_host.c wsword/runtime/elfload.c -lm -o host
+          clang -DELFLOAD_TEST -O1 -Iwsword/runtime ps5/wsword/test/export_host.c wsword/runtime/elfload.c -lm -o host
           ./host swgame.so
