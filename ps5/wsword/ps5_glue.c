@@ -57,14 +57,11 @@ void __wrap_exit(int status) { close_title(status, true); }
 void __wrap__exit(int status) { close_title(status, false); }
 void catchReturnFromMain(int status) { close_title(status, true); }
 
-// What the title's libc lacks that the runtime's dependencies name (link-title.sh refuses an import no module
-// exports: it would be null): no processes, no terminals; path limits are FreeBSD's.
+// What the title's libc lacks that the runtime's dependencies name, and the platform layer doesn't replace (build.sh
+// binds the ones it does: fork, isatty, getcwd...): path limits are FreeBSD's.
 #include <errno.h>
 #include <limits.h>
-#include <sys/types.h>
 #include <unistd.h>
-pid_t fork(void) { errno = ENOSYS; return -1; }
-int isatty(int fd) { (void)fd; errno = ENOTTY; return 0; }
 long pathconf(const char *path, int name) {
     (void)path;
     switch (name) {
