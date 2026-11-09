@@ -21,3 +21,9 @@ A title can't `dlopen` a module it brings (skills/ps5-porting `loading-code.md`)
 5. **First boot of the game**, then the renderer on RADV (ASTC decoded as on PC; RADV's own limits), audio, saves (/app0/wsword/save), movies (FFmpeg built for the console), performance, Ray-Tracing (RADV has ray queries).
 
 Each milestone ends with a build on the player's console and its log.
+
+## Updates without a new export
+
+The console's game code (`swgame.so`, from WSword Configuration's Export for PS5) is bound to WSword for the PS5 by name, at load time: the eboot's table of its own functions (ps5/wsword/exports.py), not addresses fixed at build time. So a new eboot loads the same `swgame.so` as long as the game code id stays the same. That id is computed from the generator (tools/gen.py and its passes and patches), the headers the game code includes, and the PS5 flags (`GENFLAGS_PS5`), and nothing else. Runtime changes leave it alone: the renderer, the HLE services, the menus, the console's platform layer.
+
+Each release's notes end with its id and say whether the update needs a new export; most need only the eboot.bin and the files around it, copied over the folder on the console.

@@ -86,3 +86,7 @@ for a in ${WSWORD_SYMBOLIZE:-}; do
         awk -v t="$((off))" 'BEGIN{best=""} { v=strtonum("0x"$1); if (v<=t) { best=$0; bv=v } else exit } END{ if (best!="") printf "%s +0x%x\n", substr(best, 20), t-bv; else print "?" }' "$app/WSword.sym"
     done
 done
+# The game code id this eboot loads (runtime/gamelib.c): beside it, and in the release notes, so an update says
+# whether the console's swgame.so from the last PS5 export still fits (it does while the id stays the same)
+sed -n 's/^gamelib //p' "$out/ids.txt" > "$app/swgame-id.txt"
+echo "==> game code id $(cat "$app/swgame-id.txt")"

@@ -134,6 +134,21 @@ jobs:
           TAG: ${{ inputs.release }}
           NOTES: ${{ inputs.release_notes }}
         run: |
-          if [[ -n "$NOTES" && -f "$NOTES" ]]; then n=(--notes-file "$NOTES"); else n=(--notes "WSword PS5 $TAG"); fi
+          # the notes, then whether this update needs a new PS5 export: the game code id against the last release's
+          id=$(cat dist/PPSA99777/swgame-id.txt)
+          prev=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=20" --jq '.[].body' |
+                 sed -n 's/^PS5 game code id: `\([0-9a-f]*\)`.*/\1/p' | head -1)
+          { if [[ -n "$NOTES" && -f "$NOTES" ]]; then cat "$NOTES"; else echo "WSword PS5 $TAG"; fi
+            echo
+            echo "### Updating from an earlier WSword PS5"
+            echo
+            if [[ -n $prev && $prev == "$id" ]]; then
+              echo "**No new export needed.** Copy this \`PPSA99777\` folder over yours on the console and replace the files (don't delete the folder first): your \`swgame.so\`, \`swgame.so.id\` and \`extracted\` folder stay as they are and still fit."
+            else
+              echo "**This update changes the game code:** after copying the \`PPSA99777\` folder over yours, run WSword Configuration > Export for PS5 again (with the matching WSword for PC) and copy the new \`PS5/swgame.so\` and \`PS5/swgame.so.id\` over. The \`extracted\` folder stays as it is."
+            fi
+            echo
+            echo "PS5 game code id: \`$id\`"
+          } > release-notes.md
           gh release create "$TAG" WSwordPS5-PPSA99777.zip WSwordPS5-PPSA99777.zip.sha256 --target "$GITHUB_SHA" \
-            --title "WSword PS5 $TAG" --prerelease "${n[@]}"
+            --title "WSword PS5 $TAG" --prerelease --notes-file release-notes.md
