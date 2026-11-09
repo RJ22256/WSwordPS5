@@ -796,6 +796,50 @@ static size_t hud_letters_flyt(const uint8_t *b, size_t n, uint8_t *out, int *pa
     return w;
 }
 
+#ifdef __PROSPERO__
+// (the PS5) The diamond is the Switch's: A on the right, B at the bottom. A PlayStation controller's confirm, Cross
+// (the A binding, hle/bindings.c), is at the bottom and Circle (B) on the right, so with the console's icons the
+// diamond showed Cross on the right and Circle at the bottom. A and B change places in it: the action's button and
+// its label, the dim letter, and the highlight under them (the B layout's upright one for A, the A layout's level one
+// for B - the X and Y layouts already use them so). Returns the edits made (the layout's expected count, or fewer).
+static int hud_face_set(uint8_t *b, size_t n, const char *pane, float x, float y) {
+    size_t hs = b[6] | b[7] << 8;
+    for (size_t o = hs; o + 0x54 <= n;) {
+        uint32_t sz;
+        memcpy(&sz, b + o + 4, 4);
+        if (sz < 8 || o + sz > n) break;
+        if ((!memcmp(b + o, "pan1", 4) || !memcmp(b + o, "pic1", 4) || !memcmp(b + o, "txt1", 4) ||
+             !memcmp(b + o, "wnd1", 4)) && !strncmp((const char *)b + o + 0x0C, pane, 24)) {
+            memcpy(b + o + 0x2C, &x, 4);
+            memcpy(b + o + 0x30, &y, 4);
+            return 1;
+        }
+        o += sz;
+    }
+    return 0;
+}
+static int hud_face_tex(uint8_t *b, size_t n, const char *from, const char *to) {
+    for (size_t i = 0; i + strlen(from) <= n; i++)
+        if (!memcmp(b + i, from, strlen(from))) { memcpy(b + i, to, strlen(to)); return 1; }  // (same length)
+    return 0;
+}
+static int hud_face_swap(int layout, uint8_t *b, size_t n) {
+    switch (layout) {
+    case 0:  // PaDoCommandA_00: A's button and label from the right to the bottom, the dim B to the right
+        return hud_face_set(b, n, "N_BtnA_00", 0, -26) + hud_face_set(b, n, "N_CaptureA_00", 60, -22) +
+               hud_face_set(b, n, "P_CaptureUse_00", 60, -22) + hud_face_set(b, n, "P_CaptureUse_01", 60, -22) +
+               hud_face_set(b, n, "P_CaptureUse_02", 60, -22) + hud_face_set(b, n, "T_B_00", 26.2f, 0.8f) +
+               hud_face_tex(b, n, "Nt_KeyBtnSubBaseAL_00", "Nt_KeyBtnSubBaseBL_00");  // (7)
+    case 1:  // PaDoCommandB_00: B's button and label from the bottom to the right, the dim A to the bottom
+        return hud_face_set(b, n, "N_BtnB_00", 26, 0) + hud_face_set(b, n, "N_CaptureB_00", 86, 0) +
+               hud_face_set(b, n, "T_A_01", 1, -26) +
+               hud_face_tex(b, n, "Nt_KeyBtnSubBaseBL_00", "Nt_KeyBtnSubBaseAL_00");  // (4)
+    default:  // PaDoCommandX_00, Y_00: the dim A and B change places
+        return hud_face_set(b, n, "T_A_00", 1, -26) + hud_face_set(b, n, "T_B_00", 26.2f, 0.8f);  // (2)
+    }
+}
+#endif
+
 static void hud_letters_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz) {
     static const char pack_path[] = "Pack/Bootup.pack";
     static const char *const layouts[] = {"blyt/PaDoCommandA_00.bflyt", "blyt/PaDoCommandB_00.bflyt",
@@ -831,6 +875,12 @@ static void hud_letters_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz)
             nn = at;
             size_t ln = hud_letters_flyt(arc + adoff + as, ae - as, arc2 + nn, &panes);
             if (!ln) { why = "layout not as expected"; break; }
+#ifdef __PROSPERO__
+            static const int face_edits[4] = {7, 4, 2, 2};
+            int fe = hud_face_swap(i, arc2 + nn, ln);
+            if (fe != face_edits[i]) LOG("[fs] HUD diamond: %s took %d of its %d edits\n", layouts[i], fe, face_edits[i]);
+            else if (i == 3) LOG("[fs] HUD diamond: Cross at the bottom and Circle on the right, as on the controller\n");
+#endif
             uint32_t s = (uint32_t)(nn - adoff), e = (uint32_t)(nn - adoff + ln);
             memcpy(arc2 + 0x20 + li * 16 + 8, &s, 4);
             memcpy(arc2 + 0x20 + li * 16 + 12, &e, 4);
