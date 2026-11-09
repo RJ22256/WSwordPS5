@@ -6,7 +6,6 @@
 //  - no child processes, no re-exec: the game code is built on the PC (WSword Configuration's PS5 export)
 //  - no terminal: stderr goes to WSword.log in the title folder (/app0, as WSword.log next to WSword.exe)
 #include <SDL3/SDL.h>
-#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -219,11 +218,53 @@ bool plat_exe_path(char *buf, size_t size) {
 void plat_exec(char *const argv[]) { (void)argv; }  // (no re-exec on the console: the caller carries on / reports it)
 
 // ---- diagnostics
+// A title carries no symbol table to answer dladdr from: WSword.sym beside eboot.bin does (WSwordPS5's build writes it:
+// "address kind name" per line, as linked), read once, slid by where the title was loaded (plat_symbol's own address).
+static struct { uint64_t addr; char *name; } *g_syms;
+static size_t g_nsyms;
+
+static void syms_load(void) {
+    static bool tried;
+    if (tried) return;
+    tried = true;
+    char path[1100];
+    const char *dir = getenv("SAVAGEWIND_DATA_ROOT");
+    snprintf(path, sizeof path, "%s/WSword.sym", dir && *dir ? dir : "/app0");
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    size_t cap = 0;
+    char line[600];
+    int64_t slide = 0;
+    bool slid = false;
+    while (fgets(line, sizeof line, f)) {
+        unsigned long long a;
+        char kind, name[512];
+        if (sscanf(line, "%llx %c %511[^\n]", &a, &kind, name) != 3) continue;
+        if (g_nsyms == cap) {
+            cap = cap ? cap * 2 : 16384;
+            void *n = realloc(g_syms, cap * sizeof *g_syms);
+            if (!n) break;
+            g_syms = n;
+        }
+        if (!slid && !strcmp(name, "plat_symbol")) slide = (int64_t)(uintptr_t)plat_symbol - (int64_t)a, slid = true;
+        g_syms[g_nsyms].addr = a;
+        g_syms[g_nsyms++].name = strdup(name);
+    }
+    fclose(f);
+    for (size_t i = 0; i < g_nsyms; i++) g_syms[i].addr += (uint64_t)slide;  // (sorted by address already: nm -n)
+}
+
 const char *plat_symbol(uint64_t pc, uint64_t *offset) {
-    Dl_info di = {0};
-    if (!dladdr((void *)(uintptr_t)pc, &di) || !di.dli_sname) return NULL;
-    if (offset) *offset = pc - (uint64_t)(uintptr_t)di.dli_saddr;
-    return di.dli_sname;
+    syms_load();
+    size_t lo = 0, hi = g_nsyms;
+    while (lo < hi) {  // the last symbol at or below pc
+        size_t mid = (lo + hi) / 2;
+        if (g_syms[mid].addr <= pc) lo = mid + 1;
+        else hi = mid;
+    }
+    if (!lo || pc - g_syms[lo - 1].addr > 0x100000) return NULL;  // (beyond the image's functions)
+    if (offset) *offset = pc - g_syms[lo - 1].addr;
+    return g_syms[lo - 1].name;
 }
 
 // Fatal error: a message on the console (the SDL subset shows it as a notification); the details are in the log.

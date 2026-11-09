@@ -1,1 +1,1 @@
-SheikahSlate 5aa6a1171ec677b7d44dc14a1ab725933317dd02 (2026-11-09) PC: the PS5's guest thread stacks in direct memory (256 MB reserved, committed as they grow)
+SheikahSlate d2be75a1ad6459e30fffc36709de82679f82f1ba (2026-11-09) PC: the PS5's local time (the console's time zone setting; its libc has none and no zone name - the crash on the first ToCalendarTime) and crash reports named from WSword.sym

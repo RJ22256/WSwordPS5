@@ -56,10 +56,41 @@ static void steady_clock(Service *s, IpcReq *req, IpcResp *resp) {
     }
 }
 
+#ifdef __PROSPERO__
+// (the PS5: a title's libc knows no time zone - localtime is UTC, with no zone name - so the local time is the
+// console's own setting: its offset from UTC in minutes, and an hour more in summer time)
+int sceSystemServiceParamGetInt(int id, int *value);
+static long ps5_utc_offset(int *dst) {
+    int zone = 0, summer = 0;
+    if (sceSystemServiceParamGetInt(4, &zone) != 0) zone = 0;      // SCE_SYSTEM_SERVICE_PARAM_ID_TIME_ZONE
+    if (sceSystemServiceParamGetInt(5, &summer) != 0) summer = 0;  // ..._SUMMERTIME
+    *dst = summer != 0;
+    return (long)zone * 60 + (summer ? 3600 : 0);
+}
+
+// timegm (none in a title's libc): a UTC calendar time in seconds since 1970 (days from the civil date)
+static int64_t utc_seconds(const struct tm *tm) {
+    int64_t y = tm->tm_year + 1900, m = tm->tm_mon + 1;
+    y -= m <= 2;
+    int64_t era = (y >= 0 ? y : y - 399) / 400, yoe = y - era * 400;
+    int64_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + tm->tm_mday - 1;
+    int64_t days = era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+    return days * 86400 + tm->tm_hour * 3600 + tm->tm_min * 60 + tm->tm_sec;
+}
+#endif
+
 static void to_calendar(int64_t t, IpcResp *resp, int utc) {
     time_t tt = (time_t)t;
     struct tm tm;
+#ifdef __PROSPERO__
+    int dst = 0;
+    long ps5_off = utc ? 0 : ps5_utc_offset(&dst);
+    time_t lt = tt + ps5_off;
+    gmtime_r(&lt, &tm);
+    tm.tm_isdst = dst;
+#else
     if (utc) gmtime_r(&tt, &tm); else localtime_r(&tt, &tm);
+#endif
     uint8_t *o = resp->data;
     *(uint16_t *)o = (uint16_t)(tm.tm_year + 1900);
     o[2] = (uint8_t)(tm.tm_mon + 1); o[3] = (uint8_t)tm.tm_mday;
@@ -71,9 +102,12 @@ static void to_calendar(int64_t t, IpcResp *resp, int utc) {
     gmtime_r(&tt, &g);
     long gmtoff = (long)difftime(_mkgmtime(&tm), _mkgmtime(&g));
     memcpy(o + 16, utc ? "UTC" : "LCL", 4);
+#elif defined(__PROSPERO__)
+    long gmtoff = ps5_off;
+    memcpy(o + 16, utc ? "UTC" : "LCL", 4);
 #else
     long gmtoff = tm.tm_gmtoff;
-    memcpy(o + 16, utc ? "UTC" : tm.tm_zone, 4);
+    memcpy(o + 16, utc ? "UTC" : tm.tm_zone ? tm.tm_zone : "LCL", 4);  // (a libc without a zone name: none)
 #endif
     *(uint32_t *)(o + 24) = (uint32_t)tm.tm_isdst;
     *(int32_t *)(o + 28) = utc ? 0 : (int32_t)gmtoff;
@@ -91,7 +125,13 @@ static void timezone_service(Service *s, IpcReq *req, IpcResp *resp) {
         struct tm tm = {0};
         tm.tm_year = *(uint16_t *)in - 1900; tm.tm_mon = in[2] - 1; tm.tm_mday = in[3];
         tm.tm_hour = in[4]; tm.tm_min = in[5]; tm.tm_sec = in[6]; tm.tm_isdst = -1;
+#ifdef __PROSPERO__
+        int dst;
+        tm.tm_isdst = 0;
+        int64_t t = utc_seconds(&tm) - ps5_utc_offset(&dst);  // (the console's zone: to_calendar's inverse)
+#else
         int64_t t = mktime(&tm);
+#endif
         if (req->nc) *(int64_t *)(uintptr_t)req->c[0].addr = t;
         else if (req->nb) *(int64_t *)(uintptr_t)req->b[0].addr = t;
         OUT(uint32_t, 0) = 1;
