@@ -384,11 +384,14 @@ void settings_save(void) {
 // to it: the output is the mode's own height when WSword starts (settings_ps5_output_height), so the upscaler only
 // runs after a switch of mode in play (Performance on a 1440p output: FSR from 1080p) until the next start.
 static int g_ps5_out_h = 1080;
+static int g_ps5_hz = 60;  // the output's refresh rate: 120 where the TV takes the console's 119.88 Hz
 static void mode_into(Settings *s, int mode) {
     bool q = mode == MODE_QUALITY;
-    // (Quality with frame generation: the game's 30 shown as 60 - the frame rate counts the frames on screen; the TV's
-    // 60 Hz is the most there is, so Performance stays at 60 either way)
-    s->fps_limit = q && !(s->lsfg > 0 || s->frame_gen) ? 30 : 60;
+    // With frame generation the frame rate counts the frames on screen: Performance's 60 shown as 120 and Quality's 30
+    // as 60 - where the output's refresh rate shows them (Performance on a 60 Hz output: 60 either way).
+    bool fg = s->lsfg > 0 || s->frame_gen;
+    int game = q ? 30 : 60, shown = fg ? game * 2 : game;
+    s->fps_limit = shown <= g_ps5_hz ? shown : game;
     s->rt_shadows = q;
     s->draw_distance = q ? DRAWDIST_HIGH : DRAWDIST_ORIGINAL;  // (High, not Extreme+: the player found that buggy)
     s->shadow_res = q ? SHADOW_EXTREME : SHADOW_HIGH;
@@ -409,17 +412,19 @@ static bool mode_matches(const Settings *p, const Settings *s) {
 // output follows at the next start.
 int settings_ps5_output_height(void) { return settings_current_mode() == MODE_QUALITY ? 1440 : 1080; }
 
-// The swapchain's height (vulkan/device.c): the mode in use, if one, set again for it
-void settings_ps5_output(int height) {
-    if (height <= 0 || height == g_ps5_out_h) return;
-    g_ps5_out_h = height;
-    int m = settings_current_mode();
+// The swapchain's height and the display's refresh rate (vulkan/device.c): the mode in use, if one, set again for them
+void settings_ps5_output(int height, double hz) {
+    int ihz = hz > 100 ? 120 : 60;
+    if (height <= 0 || (height == g_ps5_out_h && ihz == g_ps5_hz)) return;
+    int m = settings_current_mode();  // (as matched on the output before)
+    g_ps5_out_h = height, g_ps5_hz = ihz;
     if (m >= 0 && m < MODE_COUNT) {
         mode_into(&g_settings, m);
-        fprintf(stderr, "[mode] %s on a %dp output: drawn at %dp%s\n", m == MODE_QUALITY ? "Quality" : "Performance",
-                height, m == MODE_QUALITY ? (height < 1440 ? height : 1440) : (height < 1080 ? height : 1080),
+        fprintf(stderr, "[mode] %s on a %dp %d Hz output: drawn at %dp%s, %d fps on screen\n",
+                m == MODE_QUALITY ? "Quality" : "Performance", height, ihz,
+                m == MODE_QUALITY ? (height < 1440 ? height : 1440) : (height < 1080 ? height : 1080),
                 g_settings.upscaler == UPSCALE_FSR3 ? ", AMD FSR 3 up to the output"
-                : g_settings.upscaler == UPSCALE_FSR1 ? ", AMD FSR 1 up to the output" : "");
+                : g_settings.upscaler == UPSCALE_FSR1 ? ", AMD FSR 1 up to the output" : "", g_settings.fps_limit);
     }
 }
 #else

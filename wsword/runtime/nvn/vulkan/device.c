@@ -1271,8 +1271,8 @@ static void create_swapchain(void) {
         winsize_refresh_rate());
 #ifdef __PROSPERO__
     {   // (the PS5: the modes' render heights follow the TV's - settings.c settings_ps5_output)
-        extern void settings_ps5_output(int height);
-        settings_ps5_output((int)ext.height);
+        extern void settings_ps5_output(int height, double hz);
+        settings_ps5_output((int)ext.height, winsize_refresh_rate());
     }
 #endif
     if (dlssg_loaded()) {  // (WSword: NVIDIA's code set its own crash handler; a crash in there reported again)
@@ -1414,7 +1414,26 @@ static void *pt_waiter(void *arg) {
 
 // vkQueuePresentKHR, timed and given a present id for the waiter when SAVAGEWIND_LOG_PRESENT asks
 static VkResult queue_present_timed(VkQueue q, const VkPresentInfoKHR *info);
+#ifdef __PROSPERO__
+// (the PS5) How many vblanks each flip shows at least (RADV's VideoOut, PS5_Mesa wsi_videoout_set_flip_rate: 0 every
+// vblank, 1 every second): on a 120 Hz output, 1 while the frames on screen are 60 or fewer - Performance's 60 held
+// for two vblanks each, evenly, as a console game is - and 0 with frame generation's 120.
+int wsi_videoout_set_flip_rate(int rate);
+static void ps5_flip_rate(void) {
+    static int last = -1;
+    int fps = g_settings.fps_limit;
+    int rate = winsize_refresh_rate() > 100 && fps > 0 && fps <= 61 ? 1 : 0;
+    if (rate != last && wsi_videoout_set_flip_rate(rate) >= 0) {
+        LOG("[ps5] each frame shown for at least %d vblank%s (%d fps on screen at %.2f Hz)\n", rate + 1, rate ? "s" : "",
+            fps, winsize_refresh_rate());
+        last = rate;
+    }
+}
+#endif
 static VkResult queue_present(VkQueue q, const VkPresentInfoKHR *info) {
+#ifdef __PROSPERO__
+    ps5_flip_rate();
+#endif
     uint32_t f = g_dlssg_present_frame;  // (WSword) the game's frame, with NVIDIA DLSS frame generation: its markers
     g_dlssg_present_frame = 0;
     if (f) dlssg_marker(WSSL_M_PRESENT_START, f);

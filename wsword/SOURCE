@@ -1,2 +1,2 @@
-SheikahSlate c3c7132b4022fa38b0d20f0e30ee78243b638103 (2026-11-09) PC: Lossless frame generation on the PS5 - Lossless.dll from the title folder's lsfg/, 2x (the TV's 60 Hz), Quality's 30 shown as 60 with it
+SheikahSlate 4a19f13633faec81782653bcbb10fadcedbb9644 (2026-11-09) PC: the PS5's TV output at each mode's own resolution (Performance 1080p, Quality 1440p: no 4K scaling on the console's GPU), and its CPU and GPU in the performance overlay
 with local changes

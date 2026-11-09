@@ -350,7 +350,7 @@ static int g_want_w, g_want_h;
 void ps5_sdl_want_output(int w, int h) { g_want_w = w, g_want_h = h; }
 
 // Which display mode is better (SDL_Vulkan_CreateSurface): by size - nearest the window's when asked for one
-// (WSWORD_PS5_OUTPUT), else the largest up to 4K - then by the refresh rate nearest 60 Hz.
+// (WSWORD_PS5_OUTPUT), else the largest up to 4K - then by the higher refresh rate.
 static long mode_cost(const VkDisplayModeParametersKHR *p, bool sized, int w, int h) {
     long x = p->visibleRegion.width, y = p->visibleRegion.height;
     if (sized) return labs(x - w) + labs(y - h);
@@ -360,7 +360,10 @@ static bool mode_better(const VkDisplayModeParametersKHR *a, const VkDisplayMode
                         int h) {
     long ca = mode_cost(a, sized, w, h), cb = mode_cost(b, sized, w, h);
     if (ca != cb) return ca < cb;
-    return labs((long)a->refreshRate - 60000) < labs((long)b->refreshRate - 60000);
+    // the higher refresh rate (119.88 Hz where the TV takes it: frame generation's 60 shown as 120; the game's own
+    // frame rates are whole fractions of it), up to 120
+    long ra = a->refreshRate <= 121000 ? (long)a->refreshRate : 0, rb = b->refreshRate <= 121000 ? (long)b->refreshRate : 0;
+    return ra > rb;
 }
 
 bool SDL_Vulkan_CreateSurface(SDL_Window *w, VkInstance inst, const struct VkAllocationCallbacks *alloc, VkSurfaceKHR *out) {
@@ -380,8 +383,8 @@ bool SDL_Vulkan_CreateSurface(SDL_Window *w, VkInstance inst, const struct VkAll
     VkDisplayModePropertiesKHR *mp = calloc(nm ? nm : 1, sizeof *mp);
     if (!mp || !nm) { free(mp); return fail("the display has no modes"); }
     vkGetDisplayModePropertiesKHR(phys[0], display, &nm, mp);
-    // The TV's highest resolution up to 4K, at the refresh rate nearest 60 Hz (WSword's frame rates are 30 and 60;
-    // the console turns a 120 Hz mode back into 60 anyway) - or, with WSWORD_PS5_OUTPUT, the mode closest to that size.
+    // The size the runtime asks for (its mode's: 1080p or 1440p) or WSWORD_PS5_OUTPUT's, else the TV's largest up to 4K,
+    // at 119.88 Hz where the TV takes it (the driver offers it once the console's 120 Hz output is on).
     // (The modes render below it and AMD FSR scales up: settings.c mode_into.)
     // (WSWORD_PS5_OUTPUT, e.g. 3840x2160, over the runtime's ask; neither: the largest up to 4K)
     const char *want = getenv("WSWORD_PS5_OUTPUT");

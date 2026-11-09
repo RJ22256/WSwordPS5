@@ -784,8 +784,9 @@ static void tab_display(void) {
         static const bool avail[MODE_COUNT + 1] = {true, true, false};
         const char *md = "Performance: 60 fps, the game drawn at 1080p - the game's own draw distance, sharper shadows. "
                          "Quality: 30 fps, the game drawn at 1440p, with Ray-Tracing (shadows, ambient occlusion, water "
-                         "reflections), High draw distance and the sharpest shadows. On a 4K TV, AMD FSR 3 scales the "
-                         "picture up to it. Custom: your own settings below.";
+                         "reflections), High draw distance and the sharpest shadows. The TV gets each mode's own "
+                         "resolution. With frame generation (below), Performance shows 120 on a 120 Hz TV and Quality "
+                         "60. Custom: your own settings below.";
 #else
         static const char *const mn[MODE_COUNT + 1] = {"Battery", "Performance", "Turbo", "Unlocked", "Custom"};
         static const bool avail[MODE_COUNT + 1] = {true, true, true, true, false};
@@ -1126,14 +1127,15 @@ static void tab_display(void) {
                          "with it - use G-SYNC or a frame rate cap. Windows' Hardware-accelerated GPU scheduling must be on.") +
             "\n\n" + st + "\n" + dst;
 #ifdef __PROSPERO__
-        // (the PS5: the TV's 60 Hz is the most there is, so 2x is all frame generation can show - Quality's 30 as 60 -
-        // and Lossless.dll is copied to the title folder, not added on the start screen)
+        // (the PS5: 2x is what the TV shows - Performance's 60 as 120 on a 120 Hz output, Quality's 30 as 60 - and
+        // Lossless.dll is copied to the title folder, not added on the start screen)
         fcount = fv + 1 > 3 ? fv + 1 : 3;
-        d = std::string(tr("For Quality: the game's 30 frames a second shown as 60, with a frame made between each two "
-                           "the game draws. AMD FSR 3: built in. Lossless 2x: Lossless Scaling's frame generation, from "
-                           "your own Lossless.dll - copy it to /data/homebrew/PPSA99777/lsfg/Lossless.dll over FTP. It "
-                           "adds about half a game frame of delay and some GPU time; the menus, the map and the FPS "
-                           "counter are never generated. In Performance (already 60) it changes nothing you'd see.")) +
+        d = std::string(tr("A frame made between each two the game draws. Performance: the game's 60 shown as 120 - "
+                           "with your TV on 120 Hz (the PS5's Settings > Screen and Video > Video Output > 120 Hz Output: "
+                           "Automatic). Quality: its 30 shown as 60. AMD FSR 3: built in. Lossless 2x: Lossless "
+                           "Scaling's, from your own Lossless.dll - copy it to /data/homebrew/PPSA99777/lsfg/Lossless.dll "
+                           "over FTP. It adds about half a game frame of delay and some GPU time; the menus, the map and "
+                           "the FPS counter are never generated.")) +
             "\n\n" + st;
         int mode_before = settings_current_mode();
 #endif
