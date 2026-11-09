@@ -781,7 +781,9 @@ static size_t hud_letters_flyt(const uint8_t *b, size_t n, uint8_t *out, int *pa
                     memcpy(sec + toff, &c, 2);
                     float fs[2];  // the font size: an icon fills less of its cell than a letter
                     memcpy(fs, sec + 0x70, 8);
-                    fs[0] *= HUD_ICON_SCALE, fs[1] *= HUD_ICON_SCALE;
+                    // (as wide as high: the letters' size is 20.4 x 25.5, a narrow letter's, and the icon font's square
+                    // cells drawn at it made the round buttons ovals)
+                    fs[1] *= HUD_ICON_SCALE, fs[0] = fs[1];
                     memcpy(sec + 0x70, fs, 8);
                     (*panes)++;
                 }
