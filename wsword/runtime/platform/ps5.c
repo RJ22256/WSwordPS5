@@ -117,6 +117,60 @@ int plat_protect(uint64_t addr, uint64_t size, int prot) {
                                                    : prot == PLAT_PROT_READ ? PROT_READ : PROT_READ | PROT_WRITE);
 }
 
+// ---- the game files: the title folder's extracted/, or an external drive's
+// In order: the folder game-files.txt in the title folder names (its first line, a full path), the title folder's own
+// extracted/, then each USB drive and extended storage drive the console has mounted, at WSword/extracted,
+// PPSA99777/extracted or extracted on it. The first with the game's exefs/main is the game files.
+static bool has_game(const char *dir) {
+    char p[1200];
+    struct stat st;
+    snprintf(p, sizeof p, "%s/exefs/main", dir);
+    return stat(p, &st) == 0;
+}
+
+bool ps5_find_game_files(char *out, size_t n) {
+    FILE *f = fopen("game-files.txt", "r");
+    if (f) {
+        char line[1024] = "";
+        if (fgets(line, sizeof line, f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            size_t k = strlen(line);
+            while (k > 1 && line[k - 1] == '/') line[--k] = 0;
+            if (line[0] && has_game(line)) {
+                snprintf(out, n, "%s", line);
+                fprintf(stderr, "[ps5] game files: %s (game-files.txt)\n", out);
+                fclose(f);
+                return true;
+            }
+            fprintf(stderr, "[ps5] game-files.txt names %s, which has no exefs/main\n", line);
+        }
+        fclose(f);
+    }
+    if (has_game("extracted")) {
+        fprintf(stderr, "[ps5] game files: the title folder's extracted\n");
+        return false;  // (the default: nothing to change)
+    }
+    static const char *const drives[] = {"/mnt/usb0", "/mnt/usb1", "/mnt/usb2", "/mnt/usb3", "/mnt/usb4", "/mnt/usb5",
+                                         "/mnt/usb6", "/mnt/usb7", "/mnt/ext0", "/mnt/ext1", "/mnt/ext2"};
+    static const char *const sub[] = {"WSword/extracted", "PPSA99777/extracted", "extracted"};
+    for (size_t d = 0; d < sizeof drives / sizeof *drives; d++) {
+        struct stat st;
+        if (stat(drives[d], &st) != 0) continue;
+        for (size_t i = 0; i < sizeof sub / sizeof *sub; i++) {
+            char p[600];
+            snprintf(p, sizeof p, "%s/%s", drives[d], sub[i]);
+            if (has_game(p)) {
+                snprintf(out, n, "%s", p);
+                fprintf(stderr, "[ps5] game files: %s (an external drive)\n", out);
+                return true;
+            }
+        }
+        fprintf(stderr, "[ps5] %s: no WSword/extracted, PPSA99777/extracted or extracted with the game on it\n", drives[d]);
+    }
+    fprintf(stderr, "[ps5] game files: none found (the title folder's extracted, or WSword/extracted on a drive)\n");
+    return false;
+}
+
 // ---- guest thread stacks (runtime/kernel.c thread_start)
 // 256 MB each, reserved in direct memory (a title's own thread stacks come from its small flexible budget), the top
 // STACK_FIRST backed now and the rest a megabyte at a time as the thread reaches it (the crash handler: each thread

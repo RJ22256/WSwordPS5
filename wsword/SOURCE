@@ -1,1 +1,1 @@
-SheikahSlate d2be75a1ad6459e30fffc36709de82679f82f1ba (2026-11-09) PC: the PS5's local time (the console's time zone setting; its libc has none and no zone name - the crash on the first ToCalendarTime) and crash reports named from WSword.sym
+SheikahSlate 1e709e7afd2a655a4bbc37f933856381ea11cb8d (2026-11-09) PC: the PS5's game files on an external drive too (game-files.txt, the title folder's extracted, or WSword/extracted, PPSA99777/extracted or extracted on a USB or extended storage drive)

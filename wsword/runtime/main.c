@@ -348,6 +348,13 @@ int main(int argc, char **argv) {
     if (launcher_config_key_held()) config = true;  // (the Mac's "WSword Configuration": Option held)
 #endif
     rt_paths_init();  // the data root becomes the working directory (runtime/paths.h)
+#ifdef __PROSPERO__
+    // (the PS5: the game files in the title folder, or on an external drive - runtime/platform/ps5.c)
+    static char ps5_root[1100];
+    extern bool ps5_find_game_files(char *out, size_t n);
+    if (!strcmp(root, "extracted"))
+        if (ps5_find_game_files(ps5_root, sizeof ps5_root)) root = ps5_root;
+#endif
     if (dump) return dump_romfs(root, dump);
     if (scan) return scan_shaders(root);
 #ifndef __APPLE__
