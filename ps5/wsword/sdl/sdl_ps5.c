@@ -344,6 +344,20 @@ char const *const *SDL_Vulkan_GetInstanceExtensions(Uint32 *count) {
     return ext;
 }
 
+// Which display mode is better (SDL_Vulkan_CreateSurface): by size - nearest the window's when asked for one
+// (WSWORD_PS5_OUTPUT), else the largest up to 4K - then by the refresh rate nearest 60 Hz.
+static long mode_cost(const VkDisplayModeParametersKHR *p, bool sized, int w, int h) {
+    long x = p->visibleRegion.width, y = p->visibleRegion.height;
+    if (sized) return labs(x - w) + labs(y - h);
+    return x > 3840 || y > 2160 ? 1L << 40 : -(x * y);
+}
+static bool mode_better(const VkDisplayModeParametersKHR *a, const VkDisplayModeParametersKHR *b, bool sized, int w,
+                        int h) {
+    long ca = mode_cost(a, sized, w, h), cb = mode_cost(b, sized, w, h);
+    if (ca != cb) return ca < cb;
+    return labs((long)a->refreshRate - 60000) < labs((long)b->refreshRate - 60000);
+}
+
 bool SDL_Vulkan_CreateSurface(SDL_Window *w, VkInstance inst, const struct VkAllocationCallbacks *alloc, VkSurfaceKHR *out) {
     uint32_t np = 0;
     VkPhysicalDevice phys[4];
@@ -361,14 +375,15 @@ bool SDL_Vulkan_CreateSurface(SDL_Window *w, VkInstance inst, const struct VkAll
     VkDisplayModePropertiesKHR *mp = calloc(nm ? nm : 1, sizeof *mp);
     if (!mp || !nm) { free(mp); return fail("the display has no modes"); }
     vkGetDisplayModePropertiesKHR(phys[0], display, &nm, mp);
-    // the mode closest to the window's size (WSWORD_PS5_OUTPUT), the higher refresh rate among equals
+    // The TV's highest resolution up to 4K, at the refresh rate nearest 60 Hz (WSword's frame rates are 30 and 60;
+    // the console turns a 120 Hz mode back into 60 anyway) - or, with WSWORD_PS5_OUTPUT, the mode closest to that size.
+    // (The modes render below it and AMD FSR scales up: settings.c mode_into.)
+    const char *want = getenv("WSWORD_PS5_OUTPUT");
     uint32_t best = 0;
-    long best_d = -1;
     for (uint32_t i = 0; i < nm; i++) {
-        VkExtent2D r = mp[i].parameters.visibleRegion;
-        long d = labs((long)r.width - w->w) + labs((long)r.height - w->h);
-        if (best_d < 0 || d < best_d || (d == best_d && mp[i].parameters.refreshRate > mp[best].parameters.refreshRate))
-            best = i, best_d = d;
+        fprintf(stderr, "[ps5] display mode %u: %ux%u at %.2f Hz\n", i, mp[i].parameters.visibleRegion.width,
+                mp[i].parameters.visibleRegion.height, mp[i].parameters.refreshRate / 1000.0);
+        if (i && mode_better(&mp[i].parameters, &mp[best].parameters, want != NULL, w->w, w->h)) best = i;
     }
     VkDisplayModePropertiesKHR mode = mp[best];
     fprintf(stderr, "[ps5] display %s: %u modes, %ux%u at %.2f Hz\n", dp[0].displayName ? dp[0].displayName : "?", nm,

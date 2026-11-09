@@ -1269,6 +1269,12 @@ static void create_swapchain(void) {
     LOG("[vk] swapchain %ux%u, %u images, present mode %s (VSync %s; surface has %s), %s, display %.2f Hz\n",
         ext.width, ext.height, count, present_mode_name(mode), present_mode_name(wanted_present_mode()), modes, kind,
         winsize_refresh_rate());
+#ifdef __PROSPERO__
+    {   // (the PS5: the modes' render heights follow the TV's - settings.c settings_ps5_output)
+        extern void settings_ps5_output(int height);
+        settings_ps5_output((int)ext.height);
+    }
+#endif
     if (dlssg_loaded()) {  // (WSword: NVIDIA's code set its own crash handler; a crash in there reported again)
         plat_crash_handler_reclaim();
         LOG("[dlssg] vkCreateSwapchainKHR through Streamline\n");

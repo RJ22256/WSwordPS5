@@ -377,21 +377,42 @@ void settings_save(void) {
 // (WSword) the start screen's modes: Battery 30 fps, the game rendered smaller and AMD FSR 1 onto the window;
 // Performance 60, Turbo 120, Unlocked no limit - each at the window's full resolution
 #ifdef __PROSPERO__
-// (the PS5) Performance: 60 fps at 1080p, the game's own draw distance and the shadow maps one step up - what the
-// console holds at 60. Quality: 30 fps, Ray-Tracing (shadows, ambient occlusion, water reflections) and the rest at
-// its highest - Extreme+ draw distance, the biggest shadow maps. Both at the full 1080p, no upscaling.
+// (the PS5) Performance: 60 fps with the game drawn at 1080p, the game's own draw distance and the shadow maps one step
+// up - what the console holds at 60. Quality: 30 fps with the game drawn at 1440p, Ray-Tracing (shadows, ambient
+// occlusion, water reflections) and the rest at its highest - Extreme+ draw distance, the biggest shadow maps. On a TV
+// whose output is taller than that (WSword outputs the TV's highest, 4K where it can), AMD FSR 3 scales the picture up
+// to it: Quality's 1440p by 1.5 to 2160p, Performance's 1080p by 2; on a 1080p TV both are drawn at 1080p.
+static int g_ps5_out_h = 1080;
 static void mode_into(Settings *s, int mode) {
     bool q = mode == MODE_QUALITY;
     s->fps_limit = q ? 30 : 60;
-    s->upscaler = UPSCALE_OFF;
-    s->upscale_quality = UPQ_QUALITY;
     s->rt_shadows = q;
     s->draw_distance = q ? DRAWDIST_EXTREME : DRAWDIST_ORIGINAL;
     s->shadow_res = q ? SHADOW_EXTREME : SHADOW_HIGH;
+    int target = q ? 1440 : 1080;
+    double r = (double)g_ps5_out_h / target;
+    extern bool upscaler_available(int u);  // (nvn/output_scale.c: FSR 3 where the GPU runs it, else FSR 1)
+    s->upscaler = r <= 1.05 ? UPSCALE_OFF : upscaler_available(UPSCALE_FSR3) ? UPSCALE_FSR3 : UPSCALE_FSR1;
+    s->upscale_quality = r > 2.5 ? UPQ_ULTRA_PERFORMANCE : r > 1.85 ? UPQ_PERFORMANCE : r > 1.6 ? UPQ_BALANCED
+                       : r > 1.4 ? UPQ_QUALITY : r > 1.05 ? UPQ_ULTRA : UPQ_QUALITY;
 }
+// (the upscaler follows the TV: not part of what makes a mode)
 static bool mode_matches(const Settings *p, const Settings *s) {
-    return p->fps_limit == s->fps_limit && p->upscaler == s->upscaler && p->rt_shadows == s->rt_shadows &&
-           p->draw_distance == s->draw_distance && p->shadow_res == s->shadow_res;
+    return p->fps_limit == s->fps_limit && p->rt_shadows == s->rt_shadows && p->draw_distance == s->draw_distance &&
+           p->shadow_res == s->shadow_res;
+}
+// The swapchain's height (vulkan/device.c): the mode in use, if one, set again for it
+void settings_ps5_output(int height) {
+    if (height <= 0 || height == g_ps5_out_h) return;
+    g_ps5_out_h = height;
+    int m = settings_current_mode();
+    if (m >= 0 && m < MODE_COUNT) {
+        mode_into(&g_settings, m);
+        fprintf(stderr, "[mode] %s on a %dp output: drawn at %dp%s\n", m == MODE_QUALITY ? "Quality" : "Performance",
+                height, m == MODE_QUALITY ? (height < 1440 ? height : 1440) : (height < 1080 ? height : 1080),
+                g_settings.upscaler == UPSCALE_FSR3 ? ", AMD FSR 3 up to the output"
+                : g_settings.upscaler == UPSCALE_FSR1 ? ", AMD FSR 1 up to the output" : "");
+    }
 }
 #else
 static void mode_into(Settings *s, int mode) {
