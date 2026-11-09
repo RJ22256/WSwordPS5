@@ -385,7 +385,9 @@ void settings_save(void) {
 static int g_ps5_out_h = 1080;
 static void mode_into(Settings *s, int mode) {
     bool q = mode == MODE_QUALITY;
-    s->fps_limit = q ? 30 : 60;
+    // (Quality with frame generation: the game's 30 shown as 60 - the frame rate counts the frames on screen; the TV's
+    // 60 Hz is the most there is, so Performance stays at 60 either way)
+    s->fps_limit = q && !(s->lsfg > 0 || s->frame_gen) ? 30 : 60;
     s->rt_shadows = q;
     s->draw_distance = q ? DRAWDIST_HIGH : DRAWDIST_ORIGINAL;  // (High, not Extreme+: the player found that buggy)
     s->shadow_res = q ? SHADOW_EXTREME : SHADOW_HIGH;

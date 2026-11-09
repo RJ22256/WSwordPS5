@@ -90,3 +90,7 @@ done
 # whether the console's swgame.so from the last PS5 export still fits (it does while the id stays the same)
 sed -n 's/^gamelib //p' "$out/ids.txt" > "$app/swgame-id.txt"
 echo "==> game code id $(cat "$app/swgame-id.txt")"
+# Where the player's own Lossless.dll goes (Lossless Scaling's frame generation: runtime/nvn/vulkan/device.c)
+mkdir -p "$app/lsfg"
+printf '%s\n' "Copy your own Lossless.dll (from Lossless Scaling, on Steam) into this folder, then choose" \
+    "Frame generation > Lossless 2x in WSword's menu (touch pad + OPTIONS > Display)." > "$app/lsfg/README.txt"

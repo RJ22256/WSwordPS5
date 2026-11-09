@@ -2137,7 +2137,11 @@ static int lsfg_prepare(TexBackend *b, bool *on, uint64_t *sig) {
         struct stat st;
         const char *dll = vk_lsfg_dll_path();
         if (stat(dll, &st) != 0) {
+#ifdef __PROSPERO__
+            lsfg_stop(want, "no Lossless.dll - copy yours to /data/homebrew/PPSA99777/lsfg/Lossless.dll on the console");
+#else
             lsfg_stop(want, "no Lossless.dll - add yours on the start screen: Settings > Files > Lossless Scaling");
+#endif
             return 0;
         }
         char cache[1200];

@@ -1125,10 +1125,25 @@ static void tab_display(void) {
                          "starts with WSword: choose it, then restart. It brings NVIDIA Reflex, and VSync On works as Fast "
                          "with it - use G-SYNC or a frame rate cap. Windows' Hardware-accelerated GPU scheduling must be on.") +
             "\n\n" + st + "\n" + dst;
+#ifdef __PROSPERO__
+        // (the PS5: the TV's 60 Hz is the most there is, so 2x is all frame generation can show - Quality's 30 as 60 -
+        // and Lossless.dll is copied to the title folder, not added on the start screen)
+        fcount = fv + 1 > 3 ? fv + 1 : 3;
+        d = std::string(tr("For Quality: the game's 30 frames a second shown as 60, with a frame made between each two "
+                           "the game draws. AMD FSR 3: built in. Lossless 2x: Lossless Scaling's frame generation, from "
+                           "your own Lossless.dll - copy it to /data/homebrew/PPSA99777/lsfg/Lossless.dll over FTP. It "
+                           "adds about half a game frame of delay and some GPU time; the menus, the map and the FPS "
+                           "counter are never generated. In Performance (already 60) it changes nothing you'd see.")) +
+            "\n\n" + st;
+        int mode_before = settings_current_mode();
+#endif
         if (opt_choice("Frame generation", &fv, fgn, fcount, 0, d.c_str(), false)) {
             g_settings.frame_gen = fv == 1;
             g_settings.lsfg = fv >= 2 && fv <= 4 ? fv - 1 : 0;
             g_settings.dlssg = fv >= 5 ? fv - 4 : 0;
+#ifdef __PROSPERO__
+            if (mode_before < MODE_COUNT) settings_apply_mode(mode_before);  // (Quality: 30 or 60 on screen)
+#endif
         }
         {   // (settings.h lsfg_flow: 0 Automatic, shown as the lowest step)
             int fl = g_settings.lsfg_flow > 0 ? g_settings.lsfg_flow : 20;
