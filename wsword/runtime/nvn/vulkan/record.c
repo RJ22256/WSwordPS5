@@ -304,10 +304,102 @@ void rec_UpdateDescriptorSets(uint32_t n, const VkWriteDescriptorSet *w) {
     ENQ_END();
 }
 
+// ================================================================== (WSword) the GPU's load, on the PS5
+// The console has no GPU load to read (the PCs' come from their drivers: runtime/perfmon.c), so each command buffer's
+// work is timed on the GPU itself: a timestamp where it starts and one where it ends, in a ring of query pairs; the
+// performance overlay's sampler (vk_gpu_busy_pct) merges the finished intervals into the share of time the GPU worked.
+#ifdef __PROSPERO__
+#define GPU_SLOTS 4096
+static VkQueryPool g_gq;
+static double g_tick_ns;
+static atomic_uint g_gq_next;   // the next pair
+static unsigned g_gq_read;      // (sampler) pairs below this one are read
+static struct { VkCommandBuffer cb; unsigned slot; } g_open[128];
+
+static void gpu_time_begin(VkCommandBuffer cb) {
+    if (!g_gq) {
+        static bool tried;
+        if (tried) return;
+        tried = true;
+        uint32_t n = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(g_vk.phys, &n, NULL);
+        VkQueueFamilyProperties qf[16];
+        n = n > 16 ? 16 : n;
+        vkGetPhysicalDeviceQueueFamilyProperties(g_vk.phys, &n, qf);
+        if (g_vk.qfam >= n || !qf[g_vk.qfam].timestampValidBits || g_vk.props.limits.timestampPeriod <= 0) return;
+        VkQueryPoolCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, .queryType = VK_QUERY_TYPE_TIMESTAMP,
+                                    .queryCount = GPU_SLOTS * 2};
+        if (vkCreateQueryPool(g_vk.dev, &ci, NULL, &g_gq) != VK_SUCCESS) { g_gq = VK_NULL_HANDLE; return; }
+        vkResetQueryPool(g_vk.dev, g_gq, 0, GPU_SLOTS * 2);
+        g_tick_ns = g_vk.props.limits.timestampPeriod;
+    }
+    unsigned slot = atomic_fetch_add(&g_gq_next, 1) % GPU_SLOTS;
+    vkCmdResetQueryPool(cb, g_gq, slot * 2, 2);
+    vkCmdWriteTimestamp2(cb, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, g_gq, slot * 2);
+    for (int i = 0; i < 128; i++)
+        if (!g_open[i].cb) { g_open[i].cb = cb, g_open[i].slot = slot; return; }
+}
+static void gpu_time_end(VkCommandBuffer cb) {
+    if (!g_gq) return;
+    for (int i = 0; i < 128; i++)
+        if (g_open[i].cb == cb) {
+            vkCmdWriteTimestamp2(cb, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, g_gq, g_open[i].slot * 2 + 1);
+            g_open[i].cb = VK_NULL_HANDLE;
+            return;
+        }
+}
+static int cmp_u64pair(const void *a, const void *b) {
+    const uint64_t *x = a, *y = b;
+    return x[0] < y[0] ? -1 : x[0] > y[0];
+}
+// The share of the time since the last call the GPU was working (0..100), -1 when unknown. One caller (the sampler).
+float vk_gpu_busy_pct(void) {
+    static uint64_t last_end_seen;  // (GPU ticks) the end of the last interval counted
+    static uint64_t window_start;   // (GPU ticks) where this window began
+    if (!g_gq) return -1;
+    unsigned next = atomic_load(&g_gq_next);
+    if (next - g_gq_read > GPU_SLOTS) g_gq_read = next - GPU_SLOTS;  // (fell behind: the oldest are gone)
+    static uint64_t iv[GPU_SLOTS][2];
+    int n = 0;
+    unsigned i = g_gq_read;
+    for (; i != next; i++) {
+        uint64_t r[4];  // start, its availability, end, its availability
+        VkResult q = vkGetQueryPoolResults(g_vk.dev, g_gq, (i % GPU_SLOTS) * 2, 2, sizeof r, r, 2 * sizeof(uint64_t),
+                                           VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+        if (q != VK_SUCCESS || !r[1] || !r[3]) {
+            if (next - i > 256) continue;  // (long past and still not done: never submitted - passed over)
+            break;                         // (not finished yet: from here next time)
+        }
+        if (r[2] > r[0]) iv[n][0] = r[0], iv[n][1] = r[2], n++;
+    }
+    g_gq_read = i;
+    if (!n) return -1;
+    qsort(iv, (size_t)n, sizeof iv[0], cmp_u64pair);
+    uint64_t busy = 0, cs = iv[0][0], ce = iv[0][1], first = iv[0][0], last = 0;
+    for (int k = 1; k <= n; k++) {  // (the union of the intervals: work overlapping on the GPU counts once)
+        if (k < n && iv[k][0] <= ce) { if (iv[k][1] > ce) ce = iv[k][1]; continue; }
+        if (cs < last_end_seen) cs = last_end_seen < ce ? last_end_seen : ce;
+        busy += ce - cs;
+        if (ce > last) last = ce;
+        if (k < n) cs = iv[k][0], ce = iv[k][1];
+    }
+    uint64_t start = window_start && window_start < first ? window_start : first;
+    window_start = last;
+    last_end_seen = last;
+    double span = (double)(last - start);
+    if (span <= 0) return -1;
+    double pct = 100.0 * (double)busy / span;
+    return (float)(pct > 100 ? 100 : pct);
+}
+#endif
+
 // ================================================================== command buffers, submissions
 static void begin_cb_run(const void *p) {
     VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     VK_CHECK(vkBeginCommandBuffer(*(const VkCommandBuffer *)p, &bi));
+#ifdef __PROSPERO__
+    gpu_time_begin(*(const VkCommandBuffer *)p);
+#endif
 }
 void rec_BeginCommandBuffer(VkCommandBuffer cb) {
     if (on <= 0) { begin_cb_run(&cb); return; }
@@ -316,7 +408,12 @@ void rec_BeginCommandBuffer(VkCommandBuffer cb) {
     commit();
     ENQ_END();
 }
-static void end_cb_run(const void *p) { VK_CHECK(vkEndCommandBuffer(*(const VkCommandBuffer *)p)); }
+static void end_cb_run(const void *p) {
+#ifdef __PROSPERO__
+    gpu_time_end(*(const VkCommandBuffer *)p);
+#endif
+    VK_CHECK(vkEndCommandBuffer(*(const VkCommandBuffer *)p));
+}
 void rec_EndCommandBuffer(VkCommandBuffer cb) {
     if (on <= 0) { end_cb_run(&cb); return; }
     ENQ_T0();

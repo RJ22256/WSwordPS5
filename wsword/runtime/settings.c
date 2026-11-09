@@ -381,7 +381,8 @@ void settings_save(void) {
 // up - what the console holds at 60. Quality: 30 fps with the game drawn at 1440p, Ray-Tracing (shadows, ambient
 // occlusion, water reflections), High draw distance and the biggest shadow maps. On a TV
 // whose output is taller than that (WSword outputs the TV's highest, 4K where it can), AMD FSR 3 scales the picture up
-// to it: Quality's 1440p by 1.5 to 2160p, Performance's 1080p by 2; on a 1080p TV both are drawn at 1080p.
+// to it: the output is the mode's own height when WSword starts (settings_ps5_output_height), so the upscaler only
+// runs after a switch of mode in play (Performance on a 1440p output: FSR from 1080p) until the next start.
 static int g_ps5_out_h = 1080;
 static void mode_into(Settings *s, int mode) {
     bool q = mode == MODE_QUALITY;
@@ -403,6 +404,11 @@ static bool mode_matches(const Settings *p, const Settings *s) {
     return p->fps_limit == s->fps_limit && p->rt_shadows == s->rt_shadows && p->draw_distance == s->draw_distance &&
            p->shadow_res == s->shadow_res;
 }
+// The TV output to ask for at the start (vulkan/device.c, before the display surface): the mode's own height, 1440 for
+// Quality and 1080 for Performance (and for Custom); a mode chosen later draws at it on the output there is, and the
+// output follows at the next start.
+int settings_ps5_output_height(void) { return settings_current_mode() == MODE_QUALITY ? 1440 : 1080; }
+
 // The swapchain's height (vulkan/device.c): the mode in use, if one, set again for it
 void settings_ps5_output(int height) {
     if (height <= 0 || height == g_ps5_out_h) return;

@@ -354,6 +354,41 @@ static void platform_sample(PerfStats *s, double dt) {
     s->cpu_temp_c = thermal_zone_c();
     s->cpu_temp_source = "ACPI thermal zone";
 }
+#elif defined(__PROSPERO__)
+// (the PS5) The CPU: WSword's own time (getrusage) over the cores a title has (13 of the 16 threads: the SDL subset's
+// count); the console runs little else while a game is in front. The GPU: its work timed on the GPU itself
+// (vulkan/record.c vk_gpu_busy_pct). Temperatures: the kernel's CPU and SoC sensors. Memory: direct memory.
+#include <SDL3/SDL_cpuinfo.h>
+#include <sys/resource.h>
+#include <ps5platform/memory.h>
+int sceKernelGetCpuTemperature(int *celsius);
+int sceKernelGetSocSensorTemperature(int sensor, int *celsius);
+extern float vk_gpu_busy_pct(void);
+static void platform_sample(PerfStats *s, double dt) {
+    static double last_cpu = -1;
+    struct rusage ru;
+    if (getrusage(RUSAGE_SELF, &ru) == 0) {
+        double cpu = ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1e6 + ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6;
+        int cores = SDL_GetNumLogicalCPUCores();
+        if (last_cpu >= 0 && dt > 0 && cores > 0) {
+            float pct = (float)(100.0 * (cpu - last_cpu) / (dt * cores));
+            s->cpu_game_pct = s->cpu_total_pct = pct > 100 ? 100 : pct;
+        }
+        last_cpu = cpu;
+    }
+    int t = 0;
+    if (sceKernelGetCpuTemperature(&t) == 0 && t > 0 && t < 125) s->cpu_temp_c = (float)t, s->cpu_temp_source = "PS5 CPU sensor";
+    t = 0;
+    if (sceKernelGetSocSensorTemperature(0, &t) == 0 && t > 0 && t < 125) s->gpu_temp_c = (float)t;
+    s->gpu_pct = vk_gpu_busy_pct();
+    snprintf(s->gpu_name, sizeof s->gpu_name, "PlayStation 5 GPU (temperature: the SoC's)");
+    struct ps5_memory_stats ms;
+    if (ps5_memory_query(&ms)) {
+        s->ram_total_mb = (float)(ms.total_bytes >> 20);
+        s->ram_used_mb = (float)((ms.total_bytes - ms.free_bytes) >> 20);
+        s->ram_game_mb = s->ram_used_mb;
+    }
+}
 #else
 static float read_float_file(const char *path) {
     FILE *f = fopen(path, "r");

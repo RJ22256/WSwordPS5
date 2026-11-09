@@ -344,6 +344,11 @@ char const *const *SDL_Vulkan_GetInstanceExtensions(Uint32 *count) {
     return ext;
 }
 
+// The output the runtime asks for before its display surface (runtime/nvn/vulkan/device.c: the mode's height,
+// 1080 for Performance, 1440 for Quality)
+static int g_want_w, g_want_h;
+void ps5_sdl_want_output(int w, int h) { g_want_w = w, g_want_h = h; }
+
 // Which display mode is better (SDL_Vulkan_CreateSurface): by size - nearest the window's when asked for one
 // (WSWORD_PS5_OUTPUT), else the largest up to 4K - then by the refresh rate nearest 60 Hz.
 static long mode_cost(const VkDisplayModeParametersKHR *p, bool sized, int w, int h) {
@@ -378,12 +383,16 @@ bool SDL_Vulkan_CreateSurface(SDL_Window *w, VkInstance inst, const struct VkAll
     // The TV's highest resolution up to 4K, at the refresh rate nearest 60 Hz (WSword's frame rates are 30 and 60;
     // the console turns a 120 Hz mode back into 60 anyway) - or, with WSWORD_PS5_OUTPUT, the mode closest to that size.
     // (The modes render below it and AMD FSR scales up: settings.c mode_into.)
+    // (WSWORD_PS5_OUTPUT, e.g. 3840x2160, over the runtime's ask; neither: the largest up to 4K)
     const char *want = getenv("WSWORD_PS5_OUTPUT");
+    bool sized = want || g_want_h > 0;
+    int ww = w->w, wh = w->h;
+    if (!want && g_want_h > 0) ww = g_want_w, wh = g_want_h;
     uint32_t best = 0;
     for (uint32_t i = 0; i < nm; i++) {
         fprintf(stderr, "[ps5] display mode %u: %ux%u at %.2f Hz\n", i, mp[i].parameters.visibleRegion.width,
                 mp[i].parameters.visibleRegion.height, mp[i].parameters.refreshRate / 1000.0);
-        if (i && mode_better(&mp[i].parameters, &mp[best].parameters, want != NULL, w->w, w->h)) best = i;
+        if (i && mode_better(&mp[i].parameters, &mp[best].parameters, sized, ww, wh)) best = i;
     }
     VkDisplayModePropertiesKHR mode = mp[best];
     fprintf(stderr, "[ps5] display %s: %u modes, %ux%u at %.2f Hz\n", dp[0].displayName ? dp[0].displayName : "?", nm,

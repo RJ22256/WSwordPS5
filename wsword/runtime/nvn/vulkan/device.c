@@ -2696,6 +2696,15 @@ void ui_window_init(void) {
     // the Fullscreen setting applies from the start screen on (not only once the game runs); test windows stay windows
     winsize_apply(window);
     create_instance();
+#ifdef __PROSPERO__
+    {   // (the PS5: the TV output each mode draws at - 1080p for Performance, 1440p for Quality - so nothing is scaled
+        // on the console's GPU; the TV scales to its panel. WSwordPS5's SDL subset picks the display mode nearest it.)
+        extern void ps5_sdl_want_output(int w, int h);
+        extern int settings_ps5_output_height(void);
+        int h = settings_ps5_output_height();
+        ps5_sdl_want_output(h * 16 / 9, h);
+    }
+#endif
     // (WSword) with NVIDIA DLSS frame generation, the surface through Streamline (dlssg.c), as its swapchain needs
     if (!dlssg_create_surface(window, g_vk.inst, &g_vk.surface) &&
         !SDL_Vulkan_CreateSurface(window, g_vk.inst, NULL, &g_vk.surface))
