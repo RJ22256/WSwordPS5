@@ -118,6 +118,38 @@ int plat_protect(uint64_t addr, uint64_t size, int prot) {
                                                    : prot == PLAT_PROT_READ ? PROT_READ : PROT_READ | PROT_WRITE);
 }
 
+// ---- guest thread stacks (runtime/kernel.c thread_start)
+// 256 MB each, reserved in direct memory (a title's own thread stacks come from its small flexible budget), the top
+// STACK_FIRST backed now and the rest a megabyte at a time as the thread reaches it (the crash handler: each thread
+// has its own signal stack, plat_crash_handler_install).
+#define STACK_FIRST (8ull << 20)
+static struct { uint64_t lo, hi; } g_stacks[256];
+static _Atomic int g_nstacks;
+
+bool ps5_guest_stack(size_t size, void **base) {
+    void *b = NULL;
+    if (ps5_vrange_reserve(size, NULL, 0x10000, &b)) return false;
+    if (ps5_vrange_commit((char *)b + size - STACK_FIRST, STACK_FIRST, PS5_SHM_READ | PS5_SHM_WRITE)) {
+        ps5_vrange_release(b, size);
+        return false;
+    }
+    int i = atomic_fetch_add(&g_nstacks, 1);
+    if (i < 256) g_stacks[i].lo = (uint64_t)(uintptr_t)b, g_stacks[i].hi = (uint64_t)(uintptr_t)b + size;
+    *base = b;
+    return true;
+}
+
+static bool stack_grow(uint64_t fa) {
+    int n = atomic_load(&g_nstacks);
+    for (int i = 0; i < n && i < 256; i++)
+        if (fa >= g_stacks[i].lo + 0x10000 && fa < g_stacks[i].hi) {  // (the lowest 64 KiB stays a guard)
+            uint64_t a = fa & ~0xFFFFFull;
+            if (a < g_stacks[i].lo + 0x10000) a = g_stacks[i].lo + 0x10000;
+            return ps5_vrange_commit((void *)(uintptr_t)a, 0x100000 - (a & 0xFFFFF), PS5_SHM_READ | PS5_SHM_WRITE) == 0;
+        }
+    return false;
+}
+
 // The game code's memory (runtime/elfload.c): direct memory, read, write and execute (ps5platform/exec.h), placed
 // anywhere outside the GPU window.
 void *plat_exec_alloc(size_t bytes) {
@@ -224,7 +256,7 @@ static void crash_handler(int sig, siginfo_t *si, void *ctx) {
     static volatile int depth;
     if (sig == SIGABRT && depth++ > 0) { signal(SIGABRT, SIG_DFL); abort(); }
     uint64_t fa = (uint64_t)(uintptr_t)si->si_addr;
-    if ((sig == SIGSEGV || sig == SIGBUS) && lazy_commit(fa)) return;
+    if ((sig == SIGSEGV || sig == SIGBUS) && (lazy_commit(fa) || stack_grow(fa))) return;
     uint64_t pc = (uint64_t)uc->uc_mcontext.mc_rip, sp = (uint64_t)uc->uc_mcontext.mc_rsp, lr = 0;
     if (sig != SIGSEGV || (fa & ~0xFFFull) != (sp & ~0xFFFull)) lr = *(uint64_t *)(uintptr_t)sp;
     g_fault_is_write = (uc->uc_mcontext.mc_err & 2) != 0;  // (x86 page fault error code: bit 1 = write)

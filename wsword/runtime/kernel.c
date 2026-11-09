@@ -465,10 +465,20 @@ static KThread *thread_new(uint64_t entry, uint64_t arg, uint64_t stack_top, int
     return t;
 }
 
+#ifdef __PROSPERO__
+bool ps5_guest_stack(size_t size, void **base);  // runtime/platform/ps5.c
+#endif
+
 static void thread_start(KThread *t) {
     pthread_attr_t attr;
     pthread_attr_init(&attr);
-#ifndef _WIN32
+#if defined(__PROSPERO__)
+    // (the PS5: a thread stack the title asks for comes from its ~400 MB of flexible memory, which two of these would
+    // take; the same 256 MB as a reserved range of direct memory, committed as it grows, as on the PCs)
+    void *stack;
+    if (ps5_guest_stack(256ull << 20, &stack)) pthread_attr_setstack(&attr, stack, 256ull << 20);
+    else pthread_attr_setstacksize(&attr, 16ull << 20);
+#elif !defined(_WIN32)
     pthread_attr_setstacksize(&attr, 256ull << 20);  // guest recursion runs on the host stack
 #else
     // (the same 256 MB, as the program's default stack reservation: Makefile, --stack. winpthreads hands a stack size to

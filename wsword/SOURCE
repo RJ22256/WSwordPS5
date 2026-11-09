@@ -1,1 +1,1 @@
-SheikahSlate 10705fcb9e7021e21458ab88752fd607aaac5b4d (2026-11-09) PC 0.3.21-pc.1: Export for PS5 (release notes, version)
+SheikahSlate 5aa6a1171ec677b7d44dc14a1ab725933317dd02 (2026-11-09) PC: the PS5's guest thread stacks in direct memory (256 MB reserved, committed as they grow)
