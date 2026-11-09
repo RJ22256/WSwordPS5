@@ -172,8 +172,28 @@ static bool core_next(Core *k, KThread *t) {
     return true;
 }
 
+// (the PS5) Where each guest thread's time goes - running game code (holding its core), in the GPU backend's host work
+// (kernel_host_work_begin: submits, presents, GPU waits), waiting for its core - in TSC ticks (one instruction, read at
+// every change), logged every 10 s by kernel_report_main: which thread holds the frame rate back, and with what.
+static __thread int host_work_depth;
+#ifdef __PROSPERO__
+#include <x86intrin.h>
+enum { ACCT_NONE, ACCT_GUEST, ACCT_HOST, ACCT_COREWAIT };
+static inline void th_acct(KThread *t, int m) {
+    uint64_t now = __rdtsc();
+    int o = t->acct_mode;
+    __atomic_store_n(&t->acct[o], t->acct[o] + (now - t->acct_since), __ATOMIC_RELAXED);
+    t->acct_since = now;
+    __atomic_store_n(&t->acct_mode, m, __ATOMIC_RELAXED);
+}
+void ps5_pin_core(int core);  // runtime/platform/ps5.c: this thread onto that core's host CPUs
+#else
+#define th_acct(t, m) ((void)0)
+#endif
+
 static void core_acquire(KThread *t) {
     if (!t || !cores_on() || t->core_held >= 0 || t->off_cores) return;
+    th_acct(t, ACCT_COREWAIT);
     static int one_core = -1;  // (debug) SAVAGEWIND_ONE_CORE=1: every thread on core 0, one guest thread at a time
     if (one_core < 0) one_core = getenv("SAVAGEWIND_ONE_CORE") != NULL;
     int idx = one_core ? 0 : t->core & 3;
@@ -189,6 +209,10 @@ static void core_acquire(KThread *t) {
     if (!k->owner) k->owner = t;  // (during a reboot the core may stay with another thread: run anyway)
     t->core_held = k->owner == t ? idx : -1;
     pthread_mutex_unlock(&k->m);
+    th_acct(t, ACCT_GUEST);
+#ifdef __PROSPERO__
+    if (t->pinned1 != idx + 1) { ps5_pin_core(idx); t->pinned1 = idx + 1; }
+#endif
 }
 
 static void core_release(KThread *t) {
@@ -199,6 +223,7 @@ static void core_release(KThread *t) {
     t->core_held = -1;
     pthread_cond_broadcast(&k->cv);
     pthread_mutex_unlock(&k->m);
+    th_acct(t, host_work_depth > 0 ? ACCT_HOST : ACCT_NONE);
 }
 
 // A thread that does a coprocessor's work runs beside the four cores, as on the console: the in-process audio
@@ -225,7 +250,6 @@ void kernel_sleep_until_ns(uint64_t t) {
 // work is the GPU's: the thread that submits returns at once, and one that waits for the GPU gives its core up. Here
 // it is host code on the submitting thread, ~10 ms a frame in the open world plus shader compiles: holding the core,
 // it kept the game's other threads of that core waiting. It reads guest memory the GPU would read anyway.
-static __thread int host_work_depth;
 void kernel_host_work_begin(void) {
     if (host_work_depth++ == 0) core_release(t_cur);
 }
@@ -469,7 +493,69 @@ static KThread *thread_new(uint64_t entry, uint64_t arg, uint64_t stack_top, int
 bool ps5_guest_stack(size_t size, void **base);  // runtime/platform/ps5.c
 #endif
 
+#ifdef __PROSPERO__
+// Every 10 s: the busiest guest threads' time, and the recorder thread's (nvn/vulkan/record.c)
+static void *kernel_report_main(void *arg) {
+    (void)arg;
+    extern uint64_t rec_busy_total_ns(void);
+    uint64_t t0 = __rdtsc(), n0 = plat_now_ns(), r0 = rec_busy_total_ns();
+    for (;;) {
+        struct timespec ts = {10, 0};
+        nanosleep(&ts, NULL);
+        uint64_t t1 = __rdtsc(), n1 = plat_now_ns(), r1 = rec_busy_total_ns();
+        double span = (double)(t1 - t0);
+        if (span <= 0) { t0 = t1, n0 = n1, r0 = r1; continue; }
+        struct { uint64_t entry, id; int core, prio; double g, h, w; } top[5];
+        int ntop = 0;
+        klock();
+        for (KThread *t = g_threads; t; t = t->anext) {
+            if (!t->started || t->finished) continue;
+            uint64_t d[4];
+            int m = __atomic_load_n(&t->acct_mode, __ATOMIC_RELAXED);
+            uint64_t since = t->acct_since;
+            for (int i = 0; i < 4; i++) {
+                uint64_t v = __atomic_load_n(&t->acct[i], __ATOMIC_RELAXED);
+                if (i == m && t1 > since && t1 - since < (uint64_t)span * 2) v += t1 - since;  // (the open stretch)
+                d[i] = v > t->acct_prev[i] ? v - t->acct_prev[i] : 0;
+                t->acct_prev[i] = v > t->acct_prev[i] ? v : t->acct_prev[i];
+            }
+            double g = d[ACCT_GUEST] / span, h = d[ACCT_HOST] / span, w = d[ACCT_COREWAIT] / span;
+            if (g + h < 0.05) continue;
+            if (ntop == 5 && top[4].g + top[4].h >= g + h) continue;
+            int at = ntop < 5 ? ntop++ : 4;
+            top[at].entry = t->entry, top[at].id = t->id, top[at].core = t->core, top[at].prio = t->prio;
+            top[at].g = g, top[at].h = h, top[at].w = w;
+            for (int i = at; i > 0 && top[i].g + top[i].h > top[i - 1].g + top[i - 1].h; i--) {
+                __typeof__(top[0]) x = top[i]; top[i] = top[i - 1]; top[i - 1] = x;
+            }
+        }
+        pthread_mutex_unlock(&g_klock);
+        char line[1024];
+        int len = snprintf(line, sizeof line, "[threads] last %.0f s, share of the time:", (n1 - n0) / 1e9);
+        for (int i = 0; i < ntop && len < (int)sizeof line - 160; i++)
+            len += snprintf(line + len, sizeof line - len, "%s thread %llu (core %d, prio %d): game code %.0f%%, GPU "
+                            "backend %.0f%%, waiting for its core %.0f%%", i ? ";" : "", (unsigned long long)top[i].id,
+                            top[i].core, top[i].prio, top[i].g * 100, top[i].h * 100, top[i].w * 100);
+        if (len < (int)sizeof line - 60)
+            snprintf(line + len, sizeof line - len, "; recorder thread %.0f%% busy",
+                     n1 > n0 ? (r1 - r0) * 100.0 / (n1 - n0) : 0.0);
+        fprintf(stderr, "%s\n", line);
+        t0 = t1, n0 = n1, r0 = r1;
+    }
+    return NULL;
+}
+#endif
+
 static void thread_start(KThread *t) {
+#ifdef __PROSPERO__
+    static bool reporting;
+    if (!reporting) {
+        reporting = true;
+        pthread_t th;
+        if (pthread_create(&th, NULL, kernel_report_main, NULL) == 0) pthread_detach(th);
+    }
+    t->acct_since = __rdtsc();
+#endif
     pthread_attr_t attr;
     pthread_attr_init(&attr);
 #if defined(__PROSPERO__)

@@ -42,6 +42,10 @@ struct KThread {
     int core_held;
     uint64_t core_ticket;
     bool off_cores;  // runs beside the cores, never holding one (kernel_thread_off_cores)
+    // (the PS5) where its time goes (kernel.c acct: TSC ticks running game code, in the GPU backend, waiting for its
+    // core), and the core whose host CPUs it is pinned to (+1; 0: not pinned)
+    uint64_t acct[4], acct_since, acct_prev[4];
+    int acct_mode, pinned1;
 };
 
 typedef struct KSharedMem {

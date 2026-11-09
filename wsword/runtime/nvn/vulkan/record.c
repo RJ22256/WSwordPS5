@@ -57,6 +57,8 @@ static int on = -1;  // 1: the thread records, 0: calls at once, -1: not started
 static bool prof, prof_enq;  // SAVAGEWIND_VK_PROF; the time queuing each packet only when it isn't 2 (two clock reads a packet)
 static RecStats st_t;  // T's counters
 static _Atomic uint64_t r_busy_ns, r_wakeups, r_submit_ns;
+static _Atomic uint64_t r_busy_total_ns;  // (the PS5: the recorder's busy time since the start, for runtime/kernel.c)
+uint64_t rec_busy_total_ns(void) { return atomic_load_explicit(&r_busy_total_ns, memory_order_relaxed); }
 static _Atomic uint64_t a_seq_waits, a_seq_wait_ns;  // (waits from any thread)
 
 bool rec_on(void) { return on > 0; }
@@ -143,13 +145,20 @@ static void *run(void *arg) {
             pthread_mutex_unlock(&mu);
             ADD(r_wakeups, 1);
         }
+#ifdef __PROSPERO__
+        uint64_t t0 = NOW();  // (the console: always - its log's [threads] line, runtime/kernel.c)
+#else
         uint64_t t0 = prof ? NOW() : 0;
+#endif
         while (t != h) {
             const PktHdr *p = (const PktHdr *)(ring + (t & (ring_cap - 1)));
             if (p->fn) p->fn(p + 1);
             t += p->size;
             atomic_store_explicit(&tail, t, memory_order_release);
         }
+#ifdef __PROSPERO__
+        ADD(r_busy_total_ns, NOW() - t0);
+#endif
         if (prof) ADD(r_busy_ns, NOW() - t0);
         pthread_mutex_lock(&mu);  // caught up: drains and waiters
         pthread_cond_broadcast(&cv_done);

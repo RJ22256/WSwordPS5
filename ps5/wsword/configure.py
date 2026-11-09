@@ -74,7 +74,9 @@ def main():
     compat = os.path.join(ROOT, "ps5", "wsword", "compat")
     inc = f"-I{compat} -I{deps}/include"
     common = (f"-O2 -g {ARCH} -fno-omit-frame-pointer -fno-strict-aliasing -Wall -Wno-unused-function -Wno-format "
-              f"-Wno-unknown-warning-option -Wno-unreachable-code-generic-assoc -DWSWORD_PS5=1 -DWSWORD_EDITION='\"PS5\"'")
+              f"-Wno-unknown-warning-option -Wno-unreachable-code-generic-assoc -DWSWORD_PS5=1 -DWSWORD_EDITION='\"PS5\"' "
+              # (every thread the runtime starts begins on the host CPUs: runtime/platform/ps5.c wsword_pthread_create)
+              f"-Dpthread_create=wsword_pthread_create")
     rtflags = f"{common} -std=gnu17 -Iruntime -Iruntime/nvn -isystem third_party -isystem third_party/stb {inc}"
     imgui = "third_party/imgui"
     cxxflags = (f"{common} -std=c++17 -I{imgui} -I{imgui}/backends -Iruntime -Iruntime/nvn -isystem third_party "

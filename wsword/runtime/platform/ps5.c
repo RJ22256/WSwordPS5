@@ -230,7 +230,69 @@ void plat_sleep_until_ns(uint64_t t) {
     }
 }
 
-void plat_cpu_placement(void) {}  // (the console's 8 cores / 16 threads: the scheduler's placement)
+// ---- CPU placement
+// The four guest cores (runtime/kernel.c: a guest thread runs game code only while it holds one) each on a physical
+// core of their own - both its hardware threads - and every other thread (the recorder, the main loop, audio, RADV's
+// and the shader workers) on the cores left. Left to the scheduler, the recorder or a worker shared a physical core
+// with the game's main thread, whose speed sets the frame rate. A file WSword-no-pin beside the log turns it off.
+int scePthreadSetaffinity(pthread_t, uint64_t);
+int scePthreadGetaffinity(pthread_t, uint64_t *);
+static uint64_t g_host_cpus, g_core_cpus[4];
+static bool g_pin;
+
+void plat_cpu_placement(void) {
+    uint64_t all = 0;
+    if (scePthreadGetaffinity(pthread_self(), &all) != 0 || !all) {
+        fprintf(stderr, "[cpu] the title's CPUs unknown: the scheduler's placement\n");
+        return;
+    }
+    int ncpu = __builtin_popcountll(all), pairs[8], np = 0;
+    for (int c = 0; c < 64 && np < 8; c += 2)
+        if ((all >> c & 3) == 3) pairs[np++] = c;  // (a physical core: hardware threads 2n and 2n + 1)
+    const char *dir = getenv("SAVAGEWIND_DATA_ROOT");
+    char off[1100];
+    snprintf(off, sizeof off, "%s/WSword-no-pin", dir && *dir ? dir : "/app0");
+    bool no = access(off, F_OK) == 0;
+    if (no || np < 6) {
+        fprintf(stderr, "[cpu] %d CPUs (mask %llx), %d whole cores: the scheduler's placement%s\n", ncpu,
+                (unsigned long long)all, np, no ? " (WSword-no-pin)" : "");
+        return;
+    }
+    uint64_t guest = 0;
+    for (int i = 0; i < 4; i++) g_core_cpus[i] = 3ull << pairs[i], guest |= g_core_cpus[i];
+    g_host_cpus = all & ~guest;
+    g_pin = true;
+    scePthreadSetaffinity(pthread_self(), g_host_cpus);
+    fprintf(stderr, "[cpu] %d CPUs (mask %llx): guest cores 0-3 on CPUs %d-%d, %d-%d, %d-%d, %d-%d; every other thread "
+            "on mask %llx\n", ncpu, (unsigned long long)all, pairs[0], pairs[0] + 1, pairs[1], pairs[1] + 1, pairs[2],
+            pairs[2] + 1, pairs[3], pairs[3] + 1, (unsigned long long)g_host_cpus);
+}
+
+// (runtime/kernel.c core_acquire: a guest thread the first time it holds that core)
+void ps5_pin_core(int core) {
+    if (g_pin && core >= 0 && core < 4) scePthreadSetaffinity(pthread_self(), g_core_cpus[core]);
+}
+
+// Every thread the runtime starts begins on the host CPUs, whoever creates it (a guest thread creates the recorder, the
+// translator, the present thread...): ps5/wsword/configure.py compiles the runtime with pthread_create named
+// wsword_pthread_create, and this calls the real one (the platform layer's wrap: its thread stacks)
+#undef pthread_create
+int pthread_create(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
+typedef struct { void *(*fn)(void *); void *arg; } HostStart;
+static void *host_start(void *p) {
+    HostStart s = *(HostStart *)p;
+    free(p);
+    scePthreadSetaffinity(pthread_self(), g_host_cpus);
+    return s.fn(s.arg);
+}
+int wsword_pthread_create(pthread_t *th, const pthread_attr_t *attr, void *(*fn)(void *), void *arg) {
+    HostStart *s = g_pin ? malloc(sizeof *s) : NULL;
+    if (!s) return pthread_create(th, attr, fn, arg);
+    s->fn = fn, s->arg = arg;
+    int r = pthread_create(th, attr, host_start, s);
+    if (r) free(s);
+    return r;
+}
 
 void plat_thread_realtime(uint64_t period_ns) {
     (void)period_ns;
