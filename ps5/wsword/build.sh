@@ -37,7 +37,11 @@ used=$("$sdk/bin/llvm-nm" -u "$out/libwsword.a" "$deps"/lib/*.a 2>/dev/null | aw
 # - the working directory kept by the title (ps5/wsword/ps5_cwd.c: a title may not chdir): every path-taking call
 #   wrapped, relative paths resolved against it (those the platform replaces call its version from there)
 cwd_wraps="chdir getcwd fopen freopen open stat lstat mkdir rmdir remove unlink rename utime access opendir realpath mkstemp"
-bound=$(comm -12 <(echo "$platform_names") <(echo "$used") | grep -vxF -f <(tr ' ' '\n' <<<"$cwd_wraps"))
+# (not a name the platform layer itself calls: its ps5_sysconf calls the system's sysconf, and bound to itself it
+#  recursed until the stack ran out - the console's second crash report)
+platform_calls=$("$sdk/bin/llvm-nm" -u "$sdk/target/lib/libps5platform.a" 2>/dev/null | awk '{ print $NF }' | sort -u)
+bound=$(comm -12 <(echo "$platform_names") <(echo "$used") | comm -23 - <(echo "$platform_calls") |
+    grep -vxF -f <(tr ' ' '\n' <<<"$cwd_wraps"))
 bind_flags=""
 {
     printf '{\n    local:\n'

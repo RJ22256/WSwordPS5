@@ -95,7 +95,8 @@ void SDL_DelayPrecise(Uint64 ns) {
 
 // ---- the machine
 int SDL_GetNumLogicalCPUCores(void) {
-    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    long ps5_sysconf(int name);
+    long n = ps5_sysconf(_SC_NPROCESSORS_ONLN);  // (the CPUs a title's threads may run on: 13 of the 16)
     return n > 0 ? (int)n : 8;
 }
 int SDL_GetSystemRAM(void) {  // (direct memory, the title's own: what the runtime sizes its caches by)
