@@ -1,1 +1,1 @@
-SheikahSlate e49bd8ebfed73748254d08ea0fec2353fccb7741 (2026-11-08) PC: platform/ps5.c - rm -rf without nftw (the PS5 title's libc has none)
+SheikahSlate 9c8d30bfcdbafced1ca33c83c57e373b3786cf8c (2026-11-09) PC: paths.c - on the PS5, each data folder check in the log with its reason, and stat's answer not required

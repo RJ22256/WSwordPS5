@@ -141,6 +141,25 @@ void rt_paths_init(void) {
     }
     mkdirs(root);
     char msg[1400];
+#ifdef __PROSPERO__
+    {   // (the console's sandbox: each step in the log, with why it failed - the first title builds there)
+        struct stat st;
+        int s = stat(root, &st), se = errno;
+        bool w = writable(root);
+        int we = errno;
+        int c = chdir(root), ce = errno;
+        char cwd[1024] = "";
+        bool g = getcwd(cwd, sizeof cwd) != NULL;
+        fprintf(stderr, "[paths] %s: stat %d (%s, mode %o), writable %d (%s), chdir %d (%s), cwd %s\n", root, s,
+                s ? strerror(se) : "ok", s ? 0 : (unsigned)st.st_mode, w, w ? "ok" : strerror(we), c,
+                c ? strerror(ce) : "ok", g ? cwd : "(unknown)");
+        if (w && c == 0) {  // writable and the working directory: what the runtime needs (stat may not say dir)
+            snprintf(g_root, sizeof g_root, "%s", root);
+            fprintf(stderr, "[paths] data: %s\n", g_root);
+            return;
+        }
+    }
+#endif
     if (!is_dir(root) || !writable(root) || chdir(root) != 0) {
 #ifdef _WIN32
         snprintf(msg, sizeof msg, "WSword can't write to its folder:\n%s\n\nIt keeps game files, saves and settings "
