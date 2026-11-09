@@ -6,7 +6,6 @@
 #define IMAGELOAD_H
 
 #include <stdbool.h>
-#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,8 +16,6 @@ unsigned char *rt_image_rgba(const char *path, int *w, int *h);   // malloc'd w*
 const char *rt_image_error(void);                                 // why the last rt_image_* call failed
 
 void rt_image_free(void *px);
-// An image in memory (PNG or JPEG) as channels (1-4) bytes a pixel; free with rt_image_free
-unsigned char *rt_image_from_memory(const void *data, size_t size, int *w, int *h, int channels);
 
 // 8-bit PNG, alpha forced opaque (render targets often keep the G-buffer's alpha, which viewers turn into black).
 bool rt_save_png(const char *path, const unsigned char *rgba, int w, int h);
