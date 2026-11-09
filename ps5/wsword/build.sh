@@ -34,7 +34,10 @@ printf 'wsword' > "$work/samples.txt"  # (link-title.sh's list of samples: no sh
 platform_names=$("$sdk/bin/llvm-nm" --defined-only "$sdk/target/lib/libps5platform.a" 2>/dev/null |
     awk '$2 == "T" && $3 ~ /^ps5_/ { print substr($3, 5) }' | sort -u)
 used=$("$sdk/bin/llvm-nm" -u "$out/libwsword.a" "$deps"/lib/*.a 2>/dev/null | awk '{ print $NF }' | sort -u)
-bound=$(comm -12 <(echo "$platform_names") <(echo "$used"))
+# - the working directory kept by the title (ps5/wsword/ps5_cwd.c: a title may not chdir): every path-taking call
+#   wrapped, relative paths resolved against it (those the platform replaces call its version from there)
+cwd_wraps="chdir getcwd fopen freopen open stat lstat mkdir rmdir remove unlink rename utime access opendir realpath mkstemp"
+bound=$(comm -12 <(echo "$platform_names") <(echo "$used") | grep -vxF -f <(tr ' ' '\n' <<<"$cwd_wraps"))
 bind_flags=""
 {
     printf '{\n    local:\n'
@@ -42,7 +45,9 @@ bind_flags=""
     printf '};\n'
 } > "$work/platform-local.map"
 echo "build.sh: bound to the platform layer: $(echo $bound)"
-export LINK_EXTRA_FLAGS="--wrap=main --wrap=exit --wrap=_exit --wrap=atexit -z nostart-stop-gc -T $ps5/wsword/sections.ld$bind_flags --version-script $work/platform-local.map"
+wrap_flags=""
+for name in $cwd_wraps; do wrap_flags+=" --wrap=$name"; done
+export LINK_EXTRA_FLAGS="--wrap=main --wrap=exit --wrap=_exit --wrap=atexit$wrap_flags -z nostart-stop-gc -T $ps5/wsword/sections.ld$bind_flags --version-script $work/platform-local.map"
 trap '[[ -f $work/link/llvm-pie.elf ]] && "$(command -v llvm-readelf-18 || command -v llvm-readelf || echo readelf)" -lSW "$work/link/llvm-pie.elf" | grep -vE "^\s*$" | head -120' ERR
 bash "$ps5/tools/link-title.sh" "$work" "$vulkan" "$sdk" \
     --whole-archive "$out/libwsword.a" --no-whole-archive \

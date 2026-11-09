@@ -115,7 +115,7 @@ def main():
         obj(s, "cc", rtflags + " " + extra.get(s, ""), smaa_inc if s.endswith("smaa_data.c") else "")
     # the console's side (ps5/wsword): the SDL3 subset, the Vulkan commands (vkgen.py), the process end
     ps5w = os.path.join(ROOT, "ps5", "wsword")
-    for s in ("sdl/sdl_ps5.c", "ps5_glue.c"):
+    for s in ("sdl/sdl_ps5.c", "ps5_glue.c", "ps5_cwd.c"):
         o = f"{out}/obj/ps5/{os.path.splitext(s)[0]}.o"
         objs.append(o)
         n.append(f"build {o}: cc {ps5w}/{s}\n  flags = {common} -std=gnu17 {inc}\n")
