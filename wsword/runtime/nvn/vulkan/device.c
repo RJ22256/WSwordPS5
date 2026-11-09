@@ -1529,6 +1529,14 @@ static void present_wait_turn(int kind, int pos, int group, uint64_t seq) {
     static uint64_t last_gen;
     static double gen_iv;  // (between the groups' first frames, averaged: the game's frame time)
     if (kind == PRES_PLAIN) return;
+#ifdef __PROSPERO__
+    // (the PS5: no second queue, so these waits were on the game's own thread - each frame waited for the GPU to finish
+    // it, then half a frame more, and the game fell from 60 to about 36 with frame generation on. The console's video
+    // out shows a frame no sooner than its next vblank, in the order presented, once the GPU has drawn it: at 120 Hz the
+    // generated frame and the game's take a vblank each, the spacing these waits gave, without holding the game.)
+    (void)pos, (void)group, (void)seq;
+    return;
+#endif
     VkSemaphoreWaitInfo wi = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1, .pSemaphores = &g_vk.timeline,
                               .pValues = &seq};
     vkWaitSemaphores(g_vk.dev, &wi, 1000000000ull);  // (drawn; a second at most)

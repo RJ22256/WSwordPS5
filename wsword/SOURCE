@@ -1,1 +1,1 @@
-SheikahSlate dc5e8f2045451d08bd36b74f31281edbdca5f574 (2026-11-09) PC: the PS5 - guest cores on physical cores of their own, and where the game threads' time goes
+SheikahSlate b9fd9c49b82085053d61b9bb4f70c5c5a56f2e41 (2026-11-09) PC: the PS5 - frame generation's presents no longer hold the game
