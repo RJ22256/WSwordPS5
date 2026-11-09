@@ -779,16 +779,24 @@ static void tab_display(void) {
     {   // (WSword) Mode: the start screen card's sets of the options below (settings.c mode_into); Custom when they
         // match none - shown, never picked
         opt_section("Mode");
+#ifdef __PROSPERO__
+        static const char *const mn[MODE_COUNT + 1] = {"Performance", "Quality", "Custom"};
+        static const bool avail[MODE_COUNT + 1] = {true, true, false};
+        const char *md = "Performance: 60 fps at 1080p - the game's own draw distance, sharper shadows. Quality: 30 fps "
+                         "with Ray-Tracing (shadows, ambient occlusion, water reflections), Extreme+ draw distance and the "
+                         "sharpest shadows. Custom: your own settings below.";
+#else
         static const char *const mn[MODE_COUNT + 1] = {"Battery", "Performance", "Turbo", "Unlocked", "Custom"};
         static const bool avail[MODE_COUNT + 1] = {true, true, true, true, false};
+        const char *md = "Ready-made sets of the frame rate and the upscaler, as on the start screen's card. Battery: 30 "
+                         "fps, the game drawn smaller and AMD FSR 1 onto the window - for a laptop on its battery. "
+                         "Performance: 60 fps at the window's full resolution. Turbo: 120 fps, for a 120 Hz monitor. "
+                         "Unlocked: no limit (VSync still caps it at the monitor's rate). Custom: your own settings "
+                         "below. With frame generation on, the frame rate counts the frames on screen.";
+#endif
         static int shown = -1;
         int m = settings_current_mode();
-        if (opt_choice_avail("Mode", &m, &shown, mn, avail, MODE_COUNT + 1, MODE_PERFORMANCE,
-                             "Ready-made sets of the frame rate and the upscaler, as on the start screen's card. Battery: 30 "
-                             "fps, the game drawn smaller and AMD FSR 1 onto the window - for a laptop on its battery. "
-                             "Performance: 60 fps at the window's full resolution. Turbo: 120 fps, for a 120 Hz monitor. "
-                             "Unlocked: no limit (VSync still caps it at the monitor's rate). Custom: your own settings "
-                             "below. With frame generation on, the frame rate counts the frames on screen."))
+        if (opt_choice_avail("Mode", &m, &shown, mn, avail, MODE_COUNT + 1, MODE_PERFORMANCE, md))
             settings_apply_mode(m);
     }
     opt_section("Display");

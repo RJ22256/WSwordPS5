@@ -40,6 +40,9 @@ Settings g_settings = {
     .wide_view = true,
     .fov = 100,
     .color_lut_strength = 100,
+#ifdef __PROSPERO__
+    .shadow_res = SHADOW_HIGH,  // (the PS5: its Performance mode to start with, settings.c mode_into)
+#endif
 };
 
 static const char *const k_vsync[VSYNC_COUNT] = {"on", "fast", "adaptive", "off"};  // (VSYNC_*: the ini's words)
@@ -373,11 +376,34 @@ void settings_save(void) {
 // Video options (anti-aliasing, VSync, shadows, draw distance, colour) stay the player's
 // (WSword) the start screen's modes: Battery 30 fps, the game rendered smaller and AMD FSR 1 onto the window;
 // Performance 60, Turbo 120, Unlocked no limit - each at the window's full resolution
+#ifdef __PROSPERO__
+// (the PS5) Performance: 60 fps at 1080p, the game's own draw distance and the shadow maps one step up - what the
+// console holds at 60. Quality: 30 fps, Ray-Tracing (shadows, ambient occlusion, water reflections) and the rest at
+// its highest - Extreme+ draw distance, the biggest shadow maps. Both at the full 1080p, no upscaling.
+static void mode_into(Settings *s, int mode) {
+    bool q = mode == MODE_QUALITY;
+    s->fps_limit = q ? 30 : 60;
+    s->upscaler = UPSCALE_OFF;
+    s->upscale_quality = UPQ_QUALITY;
+    s->rt_shadows = q;
+    s->draw_distance = q ? DRAWDIST_EXTREME : DRAWDIST_ORIGINAL;
+    s->shadow_res = q ? SHADOW_EXTREME : SHADOW_HIGH;
+}
+static bool mode_matches(const Settings *p, const Settings *s) {
+    return p->fps_limit == s->fps_limit && p->upscaler == s->upscaler && p->rt_shadows == s->rt_shadows &&
+           p->draw_distance == s->draw_distance && p->shadow_res == s->shadow_res;
+}
+#else
 static void mode_into(Settings *s, int mode) {
     s->fps_limit = mode == MODE_BATTERY ? 30 : mode == MODE_TURBO ? 120 : mode == MODE_UNLOCKED ? 0 : 60;
     s->upscaler = mode == MODE_BATTERY ? UPSCALE_FSR1 : UPSCALE_OFF;
     s->upscale_quality = mode == MODE_BATTERY ? UPQ_PERFORMANCE : UPQ_QUALITY;
 }
+static bool mode_matches(const Settings *p, const Settings *s) {
+    return p->fps_limit == s->fps_limit && p->upscaler == s->upscaler &&
+           (p->upscaler == UPSCALE_OFF || p->upscale_quality == s->upscale_quality);
+}
+#endif
 void settings_apply_mode(int mode) {
     if (mode < 0 || mode >= MODE_COUNT) return;
     mode_into(&g_settings, mode);
@@ -386,9 +412,7 @@ int settings_current_mode(void) {
     for (int m = 0; m < MODE_COUNT; m++) {
         Settings p = g_settings;
         mode_into(&p, m);
-        if (p.fps_limit == g_settings.fps_limit && p.upscaler == g_settings.upscaler &&
-            (p.upscaler == UPSCALE_OFF || p.upscale_quality == g_settings.upscale_quality))
-            return m;
+        if (mode_matches(&p, &g_settings)) return m;
     }
     return MODE_CUSTOM;
 }

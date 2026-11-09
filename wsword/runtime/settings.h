@@ -141,6 +141,14 @@ void settings_save(void);
 // (WSword) the start screen's modes: sets of the Video options (settings.c mode_into) - Battery (30 fps, AMD FSR 1
 // Performance), Performance (60 fps at the window's resolution, the default), Turbo (120 fps, the same),
 // Unlocked (no limit, the window's resolution); MODE_CUSTOM while the options match none
+#ifdef __PROSPERO__
+// (the PS5: the console's two - Performance, 60 fps at 1080p; Quality, 30 fps with Ray-Tracing and everything at its
+// highest - in place of the PC's four)
+enum { MODE_PERFORMANCE = 0, MODE_QUALITY = 1, MODE_COUNT = 2, MODE_CUSTOM = 2 };
+#define MODE_NAMES {"Performance", "Quality"}
+#else
 enum { MODE_BATTERY = 0, MODE_PERFORMANCE = 1, MODE_TURBO = 2, MODE_UNLOCKED = 3, MODE_COUNT = 4, MODE_CUSTOM = 4 };
+#define MODE_NAMES {"Battery", "Performance", "Turbo", "Unlocked"}
+#endif
 void settings_apply_mode(int mode);
 int settings_current_mode(void);

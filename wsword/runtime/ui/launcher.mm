@@ -1404,7 +1404,7 @@ static int glass_main(ImVec2 ds, SDL_Window *win, const std::string &status, boo
 
     // ---- the modes at the top right (settings.c settings_apply_mode), and the display's rate / the battery
     {
-        static const char *const names[MODE_COUNT] = {"Battery", "Performance", "Turbo", "Unlocked"};
+        static const char *const names[MODE_COUNT] = MODE_NAMES;
         int cur = settings_current_mode();
         float h = 36 * u, fs = 13.5f * u, x = ds.x - 28 * u, cy = 28 * u;
         float wsum = 0, wi[MODE_COUNT];
