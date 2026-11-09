@@ -782,9 +782,10 @@ static void tab_display(void) {
 #ifdef __PROSPERO__
         static const char *const mn[MODE_COUNT + 1] = {"Performance", "Quality", "Custom"};
         static const bool avail[MODE_COUNT + 1] = {true, true, false};
-        const char *md = "Performance: 60 fps at 1080p - the game's own draw distance, sharper shadows. Quality: 30 fps "
-                         "with Ray-Tracing (shadows, ambient occlusion, water reflections), Extreme+ draw distance and the "
-                         "sharpest shadows. Custom: your own settings below.";
+        const char *md = "Performance: 60 fps, the game drawn at 1080p - the game's own draw distance, sharper shadows. "
+                         "Quality: 30 fps, the game drawn at 1440p, with Ray-Tracing (shadows, ambient occlusion, water "
+                         "reflections), High draw distance and the sharpest shadows. On a 4K TV, AMD FSR 3 scales the "
+                         "picture up to it. Custom: your own settings below.";
 #else
         static const char *const mn[MODE_COUNT + 1] = {"Battery", "Performance", "Turbo", "Unlocked", "Custom"};
         static const bool avail[MODE_COUNT + 1] = {true, true, true, true, false};

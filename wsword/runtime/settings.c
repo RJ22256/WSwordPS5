@@ -379,7 +379,7 @@ void settings_save(void) {
 #ifdef __PROSPERO__
 // (the PS5) Performance: 60 fps with the game drawn at 1080p, the game's own draw distance and the shadow maps one step
 // up - what the console holds at 60. Quality: 30 fps with the game drawn at 1440p, Ray-Tracing (shadows, ambient
-// occlusion, water reflections) and the rest at its highest - Extreme+ draw distance, the biggest shadow maps. On a TV
+// occlusion, water reflections), High draw distance and the biggest shadow maps. On a TV
 // whose output is taller than that (WSword outputs the TV's highest, 4K where it can), AMD FSR 3 scales the picture up
 // to it: Quality's 1440p by 1.5 to 2160p, Performance's 1080p by 2; on a 1080p TV both are drawn at 1080p.
 static int g_ps5_out_h = 1080;
@@ -387,7 +387,7 @@ static void mode_into(Settings *s, int mode) {
     bool q = mode == MODE_QUALITY;
     s->fps_limit = q ? 30 : 60;
     s->rt_shadows = q;
-    s->draw_distance = q ? DRAWDIST_EXTREME : DRAWDIST_ORIGINAL;
+    s->draw_distance = q ? DRAWDIST_HIGH : DRAWDIST_ORIGINAL;  // (High, not Extreme+: the player found that buggy)
     s->shadow_res = q ? SHADOW_EXTREME : SHADOW_HIGH;
     int target = q ? 1440 : 1080;
     double r = (double)g_ps5_out_h / target;
