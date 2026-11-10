@@ -29,16 +29,10 @@ void dualsense_frame(void) {
         next_read = now + 100000000u;  // (ten times a second)
         int32_t l, m;
         bool ok = game_flag_s32("CurrentHart", &l, &slot_life) && game_flag_s32("MaxHartValue", &m, &slot_max);
-        // (the game data keeps CurrentHart at 99999 while Link is about - the save's "full" - so it's live only when
-        //  it's a real count no bigger than the maximum: else the console's blue)
-        if (ok && m > 0 && l >= 0 && l <= m && m <= 160) {
+        if (ok && m > 0 && l >= 0) {
             if (life < 0) LOG("[dualsense] hearts %d/%d quarters: the light bar follows them\n", l, m);
             life = l, max = m;
-        } else {
-            static bool told;
-            if (ok && !told) told = true, LOG("[dualsense] hearts read %d/%d: not a live count, the light bar stays blue\n", l, m);
-            life = -1;
-        }
+        } else life = -1;
     }
     uint8_t r = 0, g = 64, b = 255;
     if (!menu && !title && !loading && life >= 0 && max > 0) {
