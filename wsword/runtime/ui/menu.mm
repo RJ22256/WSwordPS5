@@ -1491,11 +1491,10 @@ static void keyboard_draw(ImGuiIO &io, float scale) {
     float w = fminf(io.DisplaySize.x * 0.9f, 1100 * scale);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(w, 0), ImGuiCond_Always);
+    int pushed = osk_style_push(scale);
     ImGui::Begin("##kbd", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                                     ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::PushFont(g_font_big);
-    ImGui::TextColored(ImVec4(0.93f, 0.76f, 0.33f, 1), "%s", tr("Enter your name"));
-    ImGui::PopFont();
+    osk_title(tr("Enter your name"), g_font_big);
     static bool was_open, was_pad;
     bool pad = g_last_pad.load(), appearing = !was_open || pad != was_pad;  // (switching device: focus the new one)
     was_open = true, was_pad = pad;
@@ -1514,6 +1513,7 @@ static void keyboard_draw(ImGuiIO &io, float scale) {
         if (r) g_kbd = r > 0 ? 2 : 3;  // (Start / + confirms in menu_handle_event too)
     }
     ImGui::End();
+    osk_style_pop(pushed);
     if (g_kbd.load() != 1) was_open = false;
 }
 
@@ -1779,7 +1779,7 @@ static void quick_toggles(ImDrawList *dl, ImVec2 a, ImVec2 b, float scale) {
 // (the PS5) The in-game menu as a console's: the whole screen, the pages as a row of tabs across the top between L1 and
 // R1, the open page below at the full width, and the buttons' prompts along the foot - Cross choose, Circle back, L1 /
 // R1 tabs, touch pad + OPTIONS close. Drawn with the console's own button shapes.
-static void ps_glyph(ImDrawList *dl, ImVec2 c, float r, int kind, float scale) {  // 0 cross, 1 circle, 2 square, 3 triangle
+void ps_glyph(ImDrawList *dl, ImVec2 c, float r, int kind, float scale) {  // 0 cross, 1 circle, 2 square, 3 triangle
     const ImU32 col = IM_COL32(236, 242, 248, 255);
     float w = 2.2f * scale, k = r * 0.55f;
     dl->AddCircle(c, r, IM_COL32(236, 242, 248, 110), 32, 1.4f * scale);
@@ -1790,7 +1790,7 @@ static void ps_glyph(ImDrawList *dl, ImVec2 c, float r, int kind, float scale) {
     else if (kind == 2) dl->AddRect(ImVec2(c.x - k * 0.85f, c.y - k * 0.85f), ImVec2(c.x + k * 0.85f, c.y + k * 0.85f), col, 0, 0, w);
     else dl->AddTriangle(ImVec2(c.x, c.y - k), ImVec2(c.x - k, c.y + k * 0.7f), ImVec2(c.x + k, c.y + k * 0.7f), col, w);
 }
-static float ps_pill(ImDrawList *dl, ImVec2 a, float h, const char *text, float scale) {  // L1 / R1 / OPTIONS; its width
+float ps_pill(ImDrawList *dl, ImVec2 a, float h, const char *text, float scale) {  // L1 / R1 / OPTIONS; its width
     float fs = h * 0.62f, tw = ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0, text).x, w = tw + h * 0.9f;
     dl->AddRect(a, ImVec2(a.x + w, a.y + h), IM_COL32(236, 242, 248, 200), h * 0.3f, 0, 1.6f * scale);
     dl->AddText(ImGui::GetFont(), fs, ImVec2(a.x + (w - tw) * 0.5f, a.y + (h - fs) * 0.5f - 1 * scale),

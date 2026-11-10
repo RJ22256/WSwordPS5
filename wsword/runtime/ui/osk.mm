@@ -88,6 +88,75 @@ bool ui_input_text(const char *label, char *buf, size_t size, ImGuiInputTextFlag
     return r;
 }
 
+int osk_style_push(float scale) {
+#ifdef __PROSPERO__
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.055f, 0.06f, 0.075f, 0.97f));
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.055f, 0.06f, 0.075f, 0.97f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1, 1, 1, 0.08f));
+    ImGui::PushStyleColor(ImGuiCol_ModalWindowDimBg, ImVec4(0, 0, 0, 0.45f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 22 * scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 22 * scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(36 * scale, 30 * scale));
+    return 4 << 8 | 3;
+#else
+    (void)scale;
+    return 0;
+#endif
+}
+void osk_style_pop(int pushed) {
+    if (pushed) ImGui::PopStyleVar(pushed & 0xFF), ImGui::PopStyleColor(pushed >> 8);
+}
+void osk_title(const char *title, ImFont *big) {
+#ifdef __PROSPERO__
+    (void)big;
+    ImGui::SetWindowFontScale(1.25f);  // (the menu font, larger: the big font's glyph sizes aren't the menu's)
+    ImGui::TextColored(ImVec4(0.92f, 0.94f, 0.97f, 1), "%s", title);
+    ImGui::SetWindowFontScale(1.0f);
+    ImGui::Dummy(ImVec2(0, 6));
+#else
+    ImGui::PushFont(big);
+    ImGui::TextColored(ImVec4(0.93f, 0.76f, 0.33f, 1), "%s", title);
+    ImGui::PopFont();
+#endif
+}
+
+#ifdef __PROSPERO__
+// (the PS5) The keys as the console's keyboard draws them: dark rounded keys, the focused one white with dark text
+static void ps_key_focus(const char *label, float rounding) {
+    if (!ImGui::IsItemFocused() || !GImGui->NavCursorVisible) return;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+    dl->AddRectFilled(a, b, IM_COL32(242, 244, 247, 255), rounding);
+    ImVec2 ts = ImGui::CalcTextSize(label, NULL, true);
+    dl->AddText(ImVec2((a.x + b.x - ts.x) * 0.5f, (a.y + b.y - ts.y) * 0.5f), IM_COL32(18, 20, 24, 255), label,
+                ImGui::FindRenderedTextEnd(label));
+}
+// The prompts under the keys: the console's button shapes and what they do
+static void ps_prompts(float scale) {
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    float h = ImGui::GetFontSize() * 1.15f, r = h * 0.42f, fs = ImGui::GetFontSize() * 0.85f, gap = 30 * scale;
+    ImGui::Dummy(ImVec2(0, 8 * scale));
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    float x = p.x, y = p.y + h * 0.5f;
+    const ImU32 txt = IM_COL32(200, 210, 222, 255);
+    struct { int glyph; const char *pill, *label; } items[] = {
+        {0, NULL, "Select"}, {2, NULL, "Delete"}, {3, NULL, "Space"}, {-1, "L2", "Caps"}, {-1, "R2", "Done"}, {1, NULL, "Close"}};
+    for (auto &it : items) {
+        if (it.glyph >= 0) {
+            ps_glyph(dl, ImVec2(x + r, y), r, it.glyph, scale);
+            x += 2 * r + 8 * scale;
+        } else {
+            float ph = h * 0.8f;
+            x += ps_pill(dl, ImVec2(x, y - ph * 0.5f), ph, it.pill, scale) + 8 * scale;
+        }
+        const char *l = tr(it.label);
+        dl->AddText(ImGui::GetFont(), fs, ImVec2(x, y - fs * 0.5f), txt, l);
+        x += ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0, l).x + gap;
+    }
+    ImGui::Dummy(ImVec2(x - p.x, h));
+}
+#endif
+
 int osk_keys(char *text, size_t cap, int max_chars, bool appearing, float scale, ImFont *big, bool upper_first) {
     static bool upper = true;
     if (appearing) upper = upper_first;
@@ -107,11 +176,49 @@ int osk_keys(char *text, size_t cap, int max_chars, bool appearing, float scale,
     if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false)) r = 1;
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) r = -1;
     if (ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false)) r = 1;
+#ifdef __PROSPERO__
+    // (the PS5: the console keyboard's buttons - Square deletes, Triangle a space, L2 caps, R2 / OPTIONS done, Circle
+    // closes: done with what's typed, or cancelled when nothing is)
+    ImGui::SetKeyOwner(ImGuiKey_GamepadFaceLeft, own);
+    ImGui::SetKeyOwner(ImGuiKey_GamepadFaceUp, own);
+    if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceLeft, ImGuiInputFlags_Repeat, own)) del();
+    if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, ImGuiInputFlags_Repeat, own) && len > 0) add(' ');
+    if (ImGui::IsKeyPressed(ImGuiKey_GamepadL2, false)) upper = !upper;
+    if (ImGui::IsKeyPressed(ImGuiKey_GamepadR2, false)) r = 1;
+    if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false, own)) r = len > 0 ? 1 : -1;
+    // the text in a field of its own
+    {
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        ImVec2 a = ImGui::GetCursorScreenPos();
+        float fh = ImGui::GetFontSize() * 1.9f, fw = ImGui::GetContentRegionAvail().x;
+        dl->AddRectFilled(a, ImVec2(a.x + fw, a.y + fh), IM_COL32(28, 31, 37, 255), 10 * scale);
+        dl->AddRect(a, ImVec2(a.x + fw, a.y + fh), IM_COL32(255, 255, 255, 40), 10 * scale, 0, 1.5f * scale);
+        float ts = ImGui::GetFontSize() * 1.2f;
+        char shown[160];
+        snprintf(shown, sizeof shown, "%s%s", text, (ImGui::GetFrameCount() / 30) % 2 ? "|" : " ");
+        dl->AddText(ImGui::GetFont(), ts, ImVec2(a.x + 18 * scale, a.y + (fh - ts) * 0.5f), IM_COL32(240, 243, 247, 255), shown);
+        char cnt[32];
+        snprintf(cnt, sizeof cnt, "%d / %d", len, max_chars);
+        float cw = ImGui::CalcTextSize(cnt).x;
+        dl->AddText(ImVec2(a.x + fw - cw - 18 * scale, a.y + (fh - ImGui::GetFontSize()) * 0.5f), IM_COL32(150, 160, 172, 255), cnt);
+        ImGui::Dummy(ImVec2(fw, fh + 12 * scale));
+    }
+    (void)big;
+    float krnd = 10 * scale;
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.17f, 0.20f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.22f, 0.23f, 0.27f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.85f, 0.87f, 0.9f, 1));
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(1, 1, 1, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, krnd);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8 * scale, 8 * scale));
+#define KEY_FOCUS(l) ps_key_focus(l, krnd)
+#else
     if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, ImGuiInputFlags_Repeat, own)) del();
-
+#define KEY_FOCUS(l) ((void)0)
     ImGui::PushFont(big);
     ImGui::Text("%s_", text);
     ImGui::PopFont();
+#endif
     static const char *rows_u[] = {"ABCDEFGHIJ", "KLMNOPQRST", "UVWXYZ-.'!", "0123456789"};
     static const char *rows_l[] = {"abcdefghij", "klmnopqrst", "uvwxyz-.'!", "0123456789"};
     const char **rows = upper ? rows_u : rows_l;
@@ -125,18 +232,36 @@ int osk_keys(char *text, size_t cap, int max_chars, bool appearing, float scale,
                 ImGui::SetNavCursorVisible(true);
             }
             if (ImGui::Button(lbl, ImVec2(k, k))) add(rows[row][i]);
+            KEY_FOCUS(lbl);
         }
     }
-    if (ImGui::Button(upper ? "abc" : "ABC", ImVec2(k * 2, k))) upper = !upper;
+    const char *cl = upper ? "abc" : "ABC";
+    if (ImGui::Button(cl, ImVec2(k * 2, k))) upper = !upper;
+    KEY_FOCUS(cl);
     ImGui::SameLine();
     if (ImGui::Button(tr("Space"), ImVec2(k * 3, k)) && len > 0) add(' ');
+    KEY_FOCUS(tr("Space"));
     ImGui::SameLine();
     if (ImGui::Button(tr("Delete"), ImVec2(k * 2, k))) del();
+    KEY_FOCUS(tr("Delete"));
     ImGui::SameLine();
     if (ImGui::Button(tr("Cancel"), ImVec2(k * 2, k))) r = -1;
+    KEY_FOCUS(tr("Cancel"));
     ImGui::SameLine();
+#ifdef __PROSPERO__
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.36f, 0.85f, 1));  // (the console's blue for Done)
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.1f, 0.45f, 0.95f, 1));
+    if (ImGui::Button(tr("Done"), ImVec2(k * 2, k))) r = 1;
+    ImGui::PopStyleColor(2);
+    KEY_FOCUS(tr("Done"));
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor(4);
+    ps_prompts(scale);
+#else
     if (ImGui::Button(tr("OK"), ImVec2(k * 2, k))) r = 1;
     ImGui::TextDisabled(tr("A  type      B  delete      Start / +  OK      (%d / %d)"), len, max_chars);
+#endif
+#undef KEY_FOCUS
     return r;
 }
 
@@ -168,14 +293,14 @@ void osk_draw(ImFont *big, float scale) {
     float w = fminf(io.DisplaySize.x * 0.9f, 1100 * scale);
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowSize(ImVec2(w, 0), ImGuiCond_Always);
+    int pushed = osk_style_push(scale);
     if (!ImGui::BeginPopupModal("##osk", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                                                    ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize)) {
+        osk_style_pop(pushed);
         finish(-1);
         return;
     }
-    ImGui::PushFont(big);
-    ImGui::TextColored(ImVec4(0.93f, 0.76f, 0.33f, 1), "%s", s.title);
-    ImGui::PopFont();
+    osk_title(s.title, big);
     int max = (int)(s.size < sizeof s.text ? s.size : sizeof s.text) - 1;
     int r = cancel ? -1 : osk_keys(s.text, sizeof s.text, max, s.appearing, scale, big);
     s.appearing = false;
@@ -184,4 +309,5 @@ void osk_draw(ImFont *big, float scale) {
         finish(r);
     }
     ImGui::EndPopup();
+    osk_style_pop(pushed);
 }

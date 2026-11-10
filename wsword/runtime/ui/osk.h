@@ -25,3 +25,13 @@ bool ui_text_busy(void);
 // Start / + OK; typed keys work too (Enter OK, Esc cancel). text: ASCII, at most max_chars. Returns 1 OK, -1 cancel,
 // 0 still typing.
 int osk_keys(char *text, size_t cap, int max_chars, bool appearing, float scale, ImFont *big, bool upper_first = true);
+
+// The keyboard's window look (the PS5: the console's own - a dark, rounded panel, its keys dark with the focused one
+// white): pushed before its Begin, popped after its End; and its title. Elsewhere: nothing, and a gold title.
+int osk_style_push(float scale);
+void osk_style_pop(int pushed);
+void osk_title(const char *title, ImFont *big);
+#ifdef __PROSPERO__
+void ps_glyph(ImDrawList *dl, ImVec2 c, float r, int kind, float scale);  // (ui/menu.mm) 0 cross, 1 circle, 2 square, 3 triangle
+float ps_pill(ImDrawList *dl, ImVec2 a, float h, const char *text, float scale);
+#endif

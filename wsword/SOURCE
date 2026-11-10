@@ -1,1 +1,1 @@
-SheikahSlate e0e1970f99acdd1403f970d23ba5e2c0a36a1934 (2026-11-09) PC: an HDR look - WSword's own LUT, and the PS5's Video > HDR look toggle
+SheikahSlate 0c3775d89bf1d39017ba578b9bdcaa8c3f42f93f (2026-11-10) PC/PS5: 3D compressed textures drawn into a slice at a time (the warp dissolve noise), HUD letters and RSTB entries on a mod's packs, a PS5-styled keyboard, light bar stays blue without a live heart count

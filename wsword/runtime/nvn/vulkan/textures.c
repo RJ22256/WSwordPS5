@@ -1402,6 +1402,7 @@ static VkImageView block_view(TexBackend *b, VkFormat fmt, uint32_t lv) {
     }
     b->block = s;
     b->block_level = (uint8_t)lv;
+    b->block_slice = 0;
     b->block_pending = true;
     return vk_image_view(s, VK_IMAGE_VIEW_TYPE_2D, fmt, 0, 1, 0, 1, IDENTITY, VK_IMAGE_ASPECT_COLOR_BIT);
 }
@@ -1414,7 +1415,8 @@ void vk_block_flush(VkCommandBuffer cb, TexBackend *b) {
     if (b->bc4_cpu) { bc4_decode(cb, b); return; }
     vk_full_barrier(cb);
     VkImageCopy c = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, b->block_level, 0, 1}, .extent = {s->width, s->height, 1}};
+                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, b->block_level, 0, 1},
+                     .dstOffset = {0, 0, (int32_t)b->block_slice}, .extent = {s->width, s->height, 1}};
     rec_CmdCopyImage(cb, s->image, VK_IMAGE_LAYOUT_GENERAL, b->image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
     vk_full_barrier(cb);
 }
@@ -1577,6 +1579,21 @@ VkImageView vk_view(NvnTexture *t, const NvnTextureView *v, bool has_view, bool 
     if (ly0 + nly > b->layers) nly = b->layers - ly0;
     if (render && fmt != b->format && is_bc(b->format) && !is_bc(fmt) && lv0 == 0 && b->layers == 1 && b->depth == 1)
         return block_view(b, fmt, 0);  // (drawn into through a view of its blocks)
+    if (render && fmt != b->format && is_bc(b->format) && !is_bc(fmt) && b->layers == 1 && b->base_type == VK_IMAGE_VIEW_TYPE_3D) {
+        // A 3D compressed image drawn into a slice at a time through views of its blocks: BOTW encodes its 32x32x32
+        // BC4 3D noise on the GPU so (the noise its dissolves read - Link's warp among them). The slice's blocks go
+        // into a block-sized 2D image, copied into that slice of that level after the pass (vk_block_flush). Before,
+        // no view: the noise stayed empty, and the dissolves broke up in coarse blocks.
+        uint32_t z = v && (v->setmask & 2) ? v->min_layer : 0, d = b->depth >> lv0 ? b->depth >> lv0 : 1;
+        if (z >= d || lv0 >= b->levels) return VK_NULL_HANDLE;
+        VkImageView bv = block_view(b, fmt, lv0);
+        if (bv) b->block_slice = (uint16_t)z;
+        static int nlog;
+        if (bv && !nlog++)
+            LOG("[vk] texture #%llu (%ux%ux%u, compressed 3D): drawn into a slice at a time through its blocks\n",
+                (unsigned long long)t->debug_id, t->width, t->height, t->depth);
+        return bv;
+    }
     if (render) {
         // A view to draw into must be of an image made to be drawn into, in a format that can be (the image's usage,
         // the view format's features). Anything else, such as a compressed image's blocks the path above doesn't take

@@ -843,6 +843,29 @@ static int hud_face_swap(int layout, uint8_t *b, size_t n) {
 }
 #endif
 
+// A RomFS file's bytes as the game would read them: the overlay folder's (a mod's) when it has the file, else the
+// image's. NULL if unreadable. (The HUD letters and the RSTB's grown entries apply to a mod's Bootup.pack / RSTB
+// as to the game's: armour mods ship both, for their game data.)
+static uint8_t *rom_file_bytes(int k, size_t *n, bool *from_mod) {
+    char host[1200];
+    *from_mod = overlay_file(R->rom_files[k].path, host, sizeof host);
+    if (*from_mod) {
+        FILE *f = fopen(host, "rb");
+        if (!f) return NULL;
+        uint8_t *b = NULL;
+        long sz = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
+        if (sz > 0 && fseek(f, 0, SEEK_SET) == 0 && (b = malloc((size_t)sz)) && fread(b, 1, (size_t)sz, f) == (size_t)sz)
+            *n = (size_t)sz;
+        else free(b), b = NULL;
+        fclose(f);
+        return b;
+    }
+    *n = R->rom_files[k].size;
+    uint8_t *b = malloc(*n);
+    if (b && romfs_image_pread(R->img, b, *n, R->rom_files[k].off) != (ssize_t)*n) free(b), b = NULL;
+    return b;
+}
+
 static void hud_letters_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz) {
     static const char pack_path[] = "Pack/Bootup.pack";
     static const char *const layouts[] = {"blyt/PaDoCommandA_00.bflyt", "blyt/PaDoCommandB_00.bflyt",
@@ -851,21 +874,19 @@ static void hud_letters_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz)
     while (k < R->rom_nfiles && strcmp(R->rom_files[k].path, pack_path)) k++;
     char host[1200];
     if (k == R->rom_nfiles) return;
-    if (overlay_file(pack_path, host, sizeof host)) {
-        if (R == &images[0]) inventory_layout_from_overlay(host);
-        return;
-    }
+    bool from_mod = false;
+    if (overlay_file(pack_path, host, sizeof host) && R == &images[0]) inventory_layout_from_overlay(host);
     uint64_t t0 = plat_now_ns();
-    size_t pn = R->rom_files[k].size, zn = 0, an = 0, nn = 0;
-    uint8_t *pack = malloc(pn), *arc = NULL, *arc2 = NULL, *z2 = NULL;
+    size_t pn = 0, zn = 0, an = 0, nn = 0;
+    uint8_t *pack = rom_file_bytes(k, &pn, &from_mod), *arc = NULL, *arc2 = NULL, *z2 = NULL;
     uint32_t pdoff, ps, pe, adoff, as, ae;
     int node = -1, panes = 0;
     uint8_t *ctl = NULL;
     size_t ctl_n = 0;
-    if (romfs_image_pread(R->img, pack, pn, R->rom_files[k].off) == (ssize_t)pn)
-        node = sarc_find(pack, pn, "Layout/Common.sblarc", &pdoff, &ps, &pe);
+    if (pack) node = sarc_find(pack, pn, "Layout/Common.sblarc", &pdoff, &ps, &pe);
     if (node >= 0) arc = yaz0_unpack(pack + pdoff + ps, pe - ps, &an);
-    if (R == &images[0] && arc) inventory_layout_from_common(arc, an);
+    if (from_mod) LOG("[fs] HUD letters: on a mod's Pack/Bootup.pack (%s)\n", host);
+    if (R == &images[0] && arc && !from_mod) inventory_layout_from_common(arc, an);
     if (getenv("SAVAGEWIND_NO_HUD_LETTERS")) { free(pack), free(arc); return; }
     const char *why = node < 0 ? "no Layout/Common.sblarc" : !arc ? "archive not readable" : NULL;
     if (!why) {
@@ -999,20 +1020,17 @@ static void rstb_patch(const uint8_t *fmeta, uint64_t foff, uint64_t fsz) {
     if (!R->ngrown && !merged) return;
     int k = 0;
     while (k < R->rom_nfiles && strcmp(R->rom_files[k].path, rstb_path)) k++;
-    char host[1200];
     if (k == R->rom_nfiles && R != &images[0]) {  // (an add-on content's voices are streams: sized from the file)
         LOG("[fs] voices: %d bigger files, none in a ResourceSizeTable\n", R->ngrown);
         return;
     }
     if (k == R->rom_nfiles) { LOG("[fs] voices: no %s, %d bigger banks left as they are\n", rstb_path, R->ngrown); return; }
-    if (overlay_file(rstb_path, host, sizeof host)) {
-        LOG("[fs] voices: the overlay folder replaces the ResourceSizeTable: %d bigger banks left to it\n", R->ngrown);
-        return;
-    }
-    size_t zn = R->rom_files[k].size, n = 0;
-    uint8_t *z = malloc(zn), *d = NULL;
-    if (romfs_image_pread(R->img, z, zn, R->rom_files[k].off) == (ssize_t)zn) d = yaz0_unpack(z, zn, &n);
+    bool from_mod = false;
+    size_t zn = 0, n = 0;
+    uint8_t *z = rom_file_bytes(k, &zn, &from_mod), *d = NULL;
+    if (z) d = yaz0_unpack(z, zn, &n);
     free(z);
+    if (from_mod) LOG("[fs] the ResourceSizeTable is a mod's: the grown entries go on it\n");
     uint32_t ncrc = 0, nname = 0;
     if (d && n >= 12) memcpy(&ncrc, d + 4, 4), memcpy(&nname, d + 8, 4);
     if (!d || memcmp(d, "RSTB", 4) || 12 + (uint64_t)ncrc * 8 + (uint64_t)nname * 132 > n) {
