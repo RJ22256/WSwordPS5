@@ -168,7 +168,8 @@ void settings_load(void) {
         }
         else if (!strcmp(key, "ps5_resolution")) {  // (auto | 1080p | 1440p | 4k)
             g_settings.ps5_resolution = !strcmp(val, "1080p") ? PS5RES_1080 : !strcmp(val, "1440p") ? PS5RES_1440
-                                      : !strcmp(val, "4k") ? PS5RES_4K : PS5RES_AUTO;
+                                      : !strcmp(val, "4k") ? PS5RES_4K : !strcmp(val, "1080p-to-1440p") ? PS5RES_1080_TO_1440
+                                      : !strcmp(val, "1080p-to-4k") ? PS5RES_1080_TO_4K : PS5RES_AUTO;
         }
         else if (!strcmp(key, "app_icon")) { int n = atoi(val); g_settings.app_icon = n >= 0 && n < 6 ? n : 0; }
         else if (!strcmp(key, "sharpening")) {  // (percent, in steps of 10)
@@ -336,7 +337,7 @@ void settings_save(void) {
     fprintf(f, "lossless_flow = %d\nlossless_performance = %d\napp_icon = %d\n", g_settings.lsfg_flow, g_settings.lsfg_perf,
             g_settings.app_icon);
     {
-        static const char *const rn[PS5RES_COUNT] = {"auto", "1080p", "1440p", "4k"};
+        static const char *const rn[PS5RES_COUNT] = {"auto", "1080p", "1440p", "4k", "1080p-to-1440p", "1080p-to-4k"};
         int r = g_settings.ps5_resolution;
         fprintf(f, "ps5_resolution = %s\n", rn[r >= 0 && r < PS5RES_COUNT ? r : 0]);
     }
@@ -392,6 +393,16 @@ void settings_save(void) {
 // occlusion, water reflections), High draw distance and the biggest shadow maps. On a 4K TV, AMD FSR scales the
 // 1440p picture up to 2160p (1.5x: FSR 1 on the console, FSR 3's upscaling being held back); on a smaller one (a 1080p TV) the game draws at its own height.
 static int g_ps5_out_h = 1440;
+// The most the game draws at: 1440p, or 1080p with Video > Resolution's "from 1080p" choices (AMD FSR up from there)
+static int settings_ps5_render_height_cap(void) {
+    return g_settings.ps5_resolution == PS5RES_1080_TO_1440 || g_settings.ps5_resolution == PS5RES_1080_TO_4K ? 1080 : 1440;
+}
+// The upscaler's exact factor for those (output_scale.c upscale_mode_factor): 1440 / 1080 isn't one of AMD's modes'
+// (Ultra Quality's 1.3 would draw at 1108p); 0 for none
+double settings_ps5_upscale_factor(void) {
+    if (settings_ps5_render_height_cap() != 1080 || g_ps5_out_h <= 1080) return 0;
+    return (double)g_ps5_out_h / 1080.0;
+}
 static int g_ps5_hz = 60;  // the output's refresh rate: 120 where the TV takes the console's 119.88 Hz
 static void mode_into(Settings *s, int mode) {
     bool q = mode == MODE_QUALITY;
@@ -403,7 +414,7 @@ static void mode_into(Settings *s, int mode) {
     s->rt_shadows = q;
     s->draw_distance = q ? DRAWDIST_HIGH : DRAWDIST_ORIGINAL;  // (High, not Extreme+: the player found that buggy)
     s->shadow_res = q ? SHADOW_EXTREME : SHADOW_HIGH;
-    int target = g_ps5_out_h < 1440 ? g_ps5_out_h : 1440;
+    int cap = settings_ps5_render_height_cap(), target = g_ps5_out_h < cap ? g_ps5_out_h : cap;
     double r = (double)g_ps5_out_h / target;
     extern bool upscaler_available(int u);  // (nvn/output_scale.c: FSR 3 where the GPU runs it, else FSR 1)
     s->upscaler = r <= 1.05 ? UPSCALE_OFF : upscaler_available(UPSCALE_FSR3) ? UPSCALE_FSR3 : UPSCALE_FSR1;
@@ -422,7 +433,7 @@ static bool mode_matches(const Settings *p, const Settings *s) {
 int settings_ps5_output_height(void) {
     switch (g_settings.ps5_resolution) {
     case PS5RES_1080: return 1080;
-    case PS5RES_1440: return 1440;
+    case PS5RES_1440: case PS5RES_1080_TO_1440: return 1440;
     default: return 2160;
     }
 }
@@ -438,7 +449,7 @@ void settings_ps5_output(int height, double hz) {
         mode_into(&g_settings, m);
         fprintf(stderr, "[mode] %s on a %dp %d Hz output: drawn at %dp%s, %d fps on screen\n",
                 m == MODE_QUALITY ? "Quality" : "Performance", height, ihz,
-                height < 1440 ? height : 1440,
+                height < settings_ps5_render_height_cap() ? height : settings_ps5_render_height_cap(),
                 g_settings.upscaler == UPSCALE_FSR3 ? ", AMD FSR 3 up to the output"
                 : g_settings.upscaler == UPSCALE_FSR1 ? ", AMD FSR 1 up to the output" : "", g_settings.fps_limit);
     }

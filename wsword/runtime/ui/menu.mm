@@ -804,14 +804,16 @@ static void tab_display(void) {
 #ifdef __PROSPERO__
     {   // (the PS5) Resolution: the TV output asked for when WSword starts (settings.c settings_ps5_output_height; the
         // display mode is picked once, with the display surface - so a change applies at the next start)
-        static const char *const rn[PS5RES_COUNT] = {"Automatic", "1080p", "1440p", "4K"};
+        static const char *const rn[PS5RES_COUNT] = {"Automatic", "1080p", "1440p", "4K", "1440p from 1080p", "4K from 1080p"};
         static int started = -1;
         if (started < 0) started = g_settings.ps5_resolution;
         char rd[900];
         snprintf(rd, sizeof rd, "%s%s",
                  tr("1080p: the game drawn at 1080p, for a 1080p TV - the lightest on the GPU, the most room for "
                     "Ray-Tracing. 1440p: drawn at 1440p and shown as it is (native 1440p). 4K: drawn at 1440p, AMD FSR "
-                    "scales it up to 4K. Automatic: the TV's own - 4K where it has it (drawn at 1440p and scaled up), "
+                    "scales it up to 4K. 1440p from 1080p / 4K from 1080p: drawn at 1080p and scaled up by AMD FSR to 1440p or 4K - "
+                    "lighter on the GPU than drawing at 1440p (more room for Ray-Tracing and a steadier frame rate), a "
+                    "little softer. Automatic: the TV's own - 4K where it has it (drawn at 1440p and scaled up), "
                     "else 1440p or 1080p; with frame generation on, 120 Hz comes before a bigger size. A size chosen "
                     "here comes first, at 120 Hz where the TV takes it at that size. A TV without the size gets the "
                     "nearest it has."),

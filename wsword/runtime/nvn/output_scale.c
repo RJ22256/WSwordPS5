@@ -58,6 +58,13 @@ bool rt_dlss(void) { return g_settings.upscaler == UPSCALE_DLSS && upscaler_avai
 bool rt_temporal(void) { return rt_antialias() == AA_TAA || rt_fsr3() || rt_dlss(); }
 
 double upscale_mode_factor(int q) {
+#ifdef __PROSPERO__
+    {   // (the PS5's Video > Resolution "from 1080p": drawn at exactly 1080p - settings.c)
+        extern double settings_ps5_upscale_factor(void);
+        double o = settings_ps5_upscale_factor();
+        if (o > 0 && q == g_settings.upscale_quality) return o;
+    }
+#endif
     static const double f[UPQ_COUNT] = {1.3, 1.5, 1.7, 2.0, 3.0};
     return q == UPQ_COUNT ? 1.0 : q >= 0 && q < UPQ_COUNT ? f[q] : 1.5;  // (UPQ_COUNT: SAVAGEWIND_UPSCALE_AT fsr3-native)
 }

@@ -125,7 +125,8 @@ typedef struct {
     int app_icon;        // (WSword) Settings > Look: the window's icon, one of the start screen's (0 the Sword)
     int ps5_resolution;  // (WSword, the PS5) Video > Resolution: PS5RES_* - the TV output asked for when WSword starts
 } Settings;
-enum { PS5RES_AUTO, PS5RES_1080, PS5RES_1440, PS5RES_4K, PS5RES_COUNT };
+// (PS5RES_1080_TO_1440, PS5RES_1080_TO_4K: drawn at 1080p, AMD FSR up to the output - the lightest way to a bigger TV mode)
+enum { PS5RES_AUTO, PS5RES_1080, PS5RES_1440, PS5RES_4K, PS5RES_1080_TO_1440, PS5RES_1080_TO_4K, PS5RES_COUNT };
 
 #define STICK_DEADZONE_DEFAULT 0.10f  // (the Switch's own input service has one: the game expects 0 at rest)
 enum { DRAWDIST_ORIGINAL, DRAWDIST_MEDIUM, DRAWDIST_HIGH, DRAWDIST_EXTREME, DRAWDIST_COUNT };  // (EXTREME: WSword 0.3.20, Extreme+)  // (Original: the game's own distances)
