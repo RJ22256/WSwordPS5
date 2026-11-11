@@ -1006,7 +1006,44 @@ static void tab_display(void) {
                "frame time graph and Link's coordinates. F10 switches between them while you play.");
 
     opt_section("Rendering");
-#ifndef __PROSPERO__  // (the PS5: each mode sets the resolution - Display > Mode)
+#ifdef __PROSPERO__
+    {   // (WSword 0.3.22) the PS5: Off or AMD FSR 3.1 (FSR 1 gone), and its mode. Video > Resolution sets both each time
+        // WSword starts (settings.c mode_into); changed here, they last until then.
+        const char *ups[] = {"Off", "AMD FSR 3"};
+        static const int ups_value[] = {UPSCALE_OFF, UPSCALE_FSR3};
+        const char *ud = "How the 3D image gets to the TV's resolution. AMD FSR 3 (3.1): the game renders smaller (the "
+                         "mode below) and AMD's temporal upscaler builds the full-resolution image from the frames "
+                         "before, following the game's motion - sharp, steady and anti-aliased (Anti-aliasing has no "
+                         "effect with it). Off: the game renders at the output's resolution.\n\nVideo > Resolution "
+                         "sets these each time WSword starts (4K and the \"from 1080p\" choices: AMD FSR 3); changed "
+                         "here, they last until then. The HUD and menus always render at the output's resolution.";
+        enum { NU = sizeof ups_value / sizeof ups_value[0] };
+        bool avail[NU];
+        int ui = 0;
+        for (int i = 0; i < NU; i++) {
+            avail[i] = upscaler_available(ups_value[i]);
+            if (ups_value[i] == g_settings.upscaler) ui = i;
+        }
+        static int shown = -1;
+        if (opt_choice_avail("Upscaler", &ui, &shown, ups, avail, NU, 0, ud)) g_settings.upscaler = ups_value[ui];
+        const char *mn[UPQ_COUNT];
+        bool mavail[UPQ_COUNT];
+        for (int i = 0; i < UPQ_COUNT; i++) mn[i] = k_upscale_modes[i], mavail[i] = true;
+        float sx, sy;
+        renderer_get_scene_scale(&sx, &sy);
+        char rendering[100];
+        snprintf(rendering, sizeof rendering, tr("Rendering at %.0f x %.0f."), 1600.0 * sx, 900.0 * sy);
+        std::string md = std::string(tr("How much smaller the game renders before AMD FSR 3 brings it to the output, on "
+                                        "each side: Ultra Quality 1.3x, Quality 1.5x, Balanced 1.7x, Performance 2x, "
+                                        "Ultra Performance 3x. Smaller is faster and softer.")) + "\n\n" + rendering;
+        opt_indent(1);
+        if (g_settings.upscaler == UPSCALE_OFF) opt_disable_next();
+        static int mshown = -1;
+        opt_choice_avail("Upscaler mode", &g_settings.upscale_quality, &mshown, mn, mavail, UPQ_COUNT, UPQ_QUALITY,
+                         md.c_str());
+        opt_indent(-1);
+    }
+#else
     {   // Upscaler: Off, this OS's spatial upscaler (its modes on the row below), and the temporal ones still to come.
         // Values that can't be picked yet are shown greyed ("coming soon"); stepping onto them keeps the one in use.
         // The modes wait for render-target scaling (upscale_modes_available): until then the upscaler brings the

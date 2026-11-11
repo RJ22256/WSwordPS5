@@ -258,6 +258,10 @@ void settings_load(void) {
         LOG("[settings] %s: version %d upscaler fsr1 -> %s\n", SETTINGS_FILE, version, lower ? "fsr1" : "off");
     }
 #endif
+#ifdef __PROSPERO__
+    if (g_settings.upscaler == UPSCALE_FSR1 || g_settings.upscaler == UPSCALE_DLSS || g_settings.upscaler == UPSCALE_METALFX)
+        g_settings.upscaler = UPSCALE_FSR3;  // (0.3.22: the console's only upscaler is AMD FSR 3.1)
+#endif
     if (!tip_key) g_settings.menu_tip_seen = true;  // (a settings file from before the note: not a first launch)
     if (g_settings.volume < 0) g_settings.volume = 0;
     if (g_settings.volume > 2) g_settings.volume = 2;
@@ -399,8 +403,9 @@ static int settings_ps5_render_height_cap(void) {
 }
 // The upscaler's exact factor for those (output_scale.c upscale_mode_factor): 1440 / 1080 isn't one of AMD's modes'
 // (Ultra Quality's 1.3 would draw at 1108p); 0 for none
+static int g_ps5_q = -1;
 double settings_ps5_upscale_factor(void) {
-    if (settings_ps5_render_height_cap() != 1080 || g_ps5_out_h <= 1080) return 0;
+    if (settings_ps5_render_height_cap() != 1080 || g_ps5_out_h <= 1080 || g_settings.upscale_quality != g_ps5_q) return 0;
     return (double)g_ps5_out_h / 1080.0;
 }
 static int g_ps5_hz = 60;  // the output's refresh rate: 120 where the TV takes the console's 119.88 Hz
@@ -417,9 +422,10 @@ static void mode_into(Settings *s, int mode) {
     int cap = settings_ps5_render_height_cap(), target = g_ps5_out_h < cap ? g_ps5_out_h : cap;
     double r = (double)g_ps5_out_h / target;
     extern bool upscaler_available(int u);  // (nvn/output_scale.c: FSR 3 where the GPU runs it, else FSR 1)
-    s->upscaler = r <= 1.05 ? UPSCALE_OFF : upscaler_available(UPSCALE_FSR3) ? UPSCALE_FSR3 : UPSCALE_FSR1;
+    s->upscaler = r <= 1.05 ? UPSCALE_OFF : UPSCALE_FSR3;  // (0.3.22: AMD FSR 3.1, FSR 1 gone on the console)
     s->upscale_quality = r > 2.5 ? UPQ_ULTRA_PERFORMANCE : r > 1.85 ? UPQ_PERFORMANCE : r > 1.6 ? UPQ_BALANCED
                        : r > 1.4 ? UPQ_QUALITY : r > 1.05 ? UPQ_ULTRA : UPQ_QUALITY;
+    g_ps5_q = s->upscale_quality;  // (the mode the output gave: settings_ps5_upscale_factor's exact 1080p for it only)
 }
 // (the upscaler follows the TV: not part of what makes a mode)
 static bool mode_matches(const Settings *p, const Settings *s) {
@@ -451,7 +457,7 @@ void settings_ps5_output(int height, double hz) {
                 m == MODE_QUALITY ? "Quality" : "Performance", height, ihz,
                 height < settings_ps5_render_height_cap() ? height : settings_ps5_render_height_cap(),
                 g_settings.upscaler == UPSCALE_FSR3 ? ", AMD FSR 3 up to the output"
-                : g_settings.upscaler == UPSCALE_FSR1 ? ", AMD FSR 1 up to the output" : "", g_settings.fps_limit);
+                : "", g_settings.fps_limit);
     }
 }
 #else

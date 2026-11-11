@@ -1,1 +1,1 @@
-SheikahSlate 7be0af0102d1711633814053edb19ae1afd61fb6 (2026-11-11) PS5: AMD FSR 3.1 upscaling in place of FSR 1; the console's own keyboard (the system IME dialog, loaded at run time) before WSword's
+SheikahSlate c13992d84273618e041f55cdb9939108d72608b4 (2026-11-11) PS5: AMD FSR 1 removed - FSR 3.1 the only upscaler (settings mapped, game options list); Video > Rendering > Upscaler and its mode shown on the console

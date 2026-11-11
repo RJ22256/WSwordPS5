@@ -43,7 +43,7 @@ bool dlss_available(void);  // (WSword: vulkan/dlss.h - wsword_dlss.dll, an RTX 
 bool fsr3_upscaler_enabled(void) {
     static int on = -1;
 #ifdef __PROSPERO__
-    if (on < 0) on = !(getenv("SAVAGEWIND_FSR3") && atoi(getenv("SAVAGEWIND_FSR3")) == 0);
+    if (on < 0) on = 1;  // (0.3.22: FSR 3 is the console's only upscaler - FSR 1 is gone there)
 #else
     if (on < 0) on = getenv("SAVAGEWIND_FSR3") && atoi(getenv("SAVAGEWIND_FSR3")) != 0;
 #endif
@@ -54,6 +54,10 @@ bool upscaler_available(int u) {
 #ifdef __APPLE__
     return u == UPSCALE_OFF || u == UPSCALE_METALFX;
 #else
+#ifdef __PROSPERO__
+    // (WSword 0.3.22) the PS5: AMD FSR 3.1 only - FSR 1 replaced entirely
+    return u == UPSCALE_OFF || (u == UPSCALE_FSR3 && fsr3_available());
+#endif
     return u == UPSCALE_OFF || u == UPSCALE_FSR1 || (u == UPSCALE_FSR3 && fsr3_available() && fsr3_upscaler_enabled()) ||
            (u == UPSCALE_DLSS && dlss_available());
 #endif

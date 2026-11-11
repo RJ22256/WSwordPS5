@@ -147,6 +147,8 @@ static int fg_count(void) {
 // the page opens again. So are the upscaler's modes until the game renders below the window's size (output_scale.c).
 #ifdef __APPLE__
 const int k_ups_value[] = {UPSCALE_OFF, UPSCALE_METALFX};
+#elif defined(__PROSPERO__)
+const int k_ups_value[] = {UPSCALE_OFF, UPSCALE_FSR3};  // (WSword 0.3.22: the PS5's only upscaler is AMD FSR 3.1)
 #else
 const int k_ups_value[] = {UPSCALE_OFF, UPSCALE_FSR1, UPSCALE_FSR3, UPSCALE_DLSS};
 #endif
