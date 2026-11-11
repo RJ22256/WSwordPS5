@@ -782,8 +782,7 @@ static void tab_display(void) {
 #ifdef __PROSPERO__
         static const char *const mn[MODE_COUNT + 1] = {"Performance", "Quality", "Custom"};
         static const bool avail[MODE_COUNT + 1] = {true, true, false};
-        const char *md = "Both modes draw the game at 1440p - on a 4K TV, AMD FSR scales it up to 4K (at 120 Hz where the TV takes it; "
-                         "with frame generation on, 120 Hz comes first: a TV with 120 Hz only at 1440p gets 1440p). "
+        const char *md = "Both modes draw the game at up to 1440p (Resolution, below, says what the TV gets). "
                          "Performance: 60 fps - the game's own draw distance, sharper shadows. "
                          "Quality: 30 fps with Ray-Tracing (shadows, ambient occlusion, water reflections), High draw "
                          "distance and the sharpest shadows. With frame generation (below), Performance shows 120 on a "
@@ -802,6 +801,26 @@ static void tab_display(void) {
         if (opt_choice_avail("Mode", &m, &shown, mn, avail, MODE_COUNT + 1, MODE_PERFORMANCE, md))
             settings_apply_mode(m);
     }
+#ifdef __PROSPERO__
+    {   // (the PS5) Resolution: the TV output asked for when WSword starts (settings.c settings_ps5_output_height; the
+        // display mode is picked once, with the display surface - so a change applies at the next start)
+        static const char *const rn[PS5RES_COUNT] = {"Automatic", "1080p", "1440p", "4K"};
+        static int started = -1;
+        if (started < 0) started = g_settings.ps5_resolution;
+        char rd[900];
+        snprintf(rd, sizeof rd, "%s%s",
+                 tr("1080p: the game drawn at 1080p, for a 1080p TV - the lightest on the GPU, the most room for "
+                    "Ray-Tracing. 1440p: drawn at 1440p and shown as it is (native 1440p). 4K: drawn at 1440p, AMD FSR "
+                    "scales it up to 4K. Automatic: the TV's own - 4K where it has it (drawn at 1440p and scaled up), "
+                    "else 1440p or 1080p; with frame generation on, 120 Hz comes before a bigger size. A size chosen "
+                    "here comes first, at 120 Hz where the TV takes it at that size. A TV without the size gets the "
+                    "nearest it has."),
+                 g_settings.ps5_resolution != started
+                     ? tr("\n\nApplies the next time WSword starts: close it from the PS5's home screen, then start it again.")
+                     : "");
+        opt_choice("Resolution", &g_settings.ps5_resolution, rn, PS5RES_COUNT, PS5RES_AUTO, rd, false);
+    }
+#endif
 #ifdef __PROSPERO__
     {   // (the PS5) HDR look: the shipped HDR_Look LUT at full strength (third_party/luts) - an SDR picture made to feel
         // like HDR; the console's own HDR output isn't open to a title like this one

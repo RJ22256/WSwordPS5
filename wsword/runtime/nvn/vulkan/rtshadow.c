@@ -15,9 +15,16 @@ uint64_t renderer_present_count(void);
 #define MAX_CASC 8      // cascades (the game draws 3): one acceleration structure each, the instance mask its bit
 #define MAX_SEG 4096    // runs of caster draws (the same cascade, opaque or not, one after another)
 #define VERT 16         // bytes a captured vertex (vec4: the clip position, then the world position in place)
-#define RAYS 8          // per pixel, over the sun's disc (0.3.13: 8 - 4 left the penumbras grainy, the filter blurred them)
-#define AO_RAYS 6       // per pixel, ambient occlusion (0.3.13)
-#define UBO_FLOATS 216  // trace_src's / refl_src's U (0.3.19: the world camera's view-projection, the reflections')
+// (0.3.21) Fewer rays a frame, turned a little each frame and blended with the last frames' (trace_src's history):
+// about as many over three frames as 8 and 6 gave in one, for half the GPU time - and the grass's shimmer evened out
+#define RAYS 4          // per pixel, over the sun's disc (0.3.13: 8 in one frame)
+#define AO_RAYS 3       // per pixel, ambient occlusion (0.3.13: 6 in one frame)
+#define UBO_FLOATS 240  // trace_src's / refl_src's U (0.3.19: the world camera's view-projection, the reflections';
+                        // 0.3.21: the last frame's camera, the history and the distances)
+#define RT_FADE_START 50.0f  // (0.3.21) metres: from here the rays' shadows hand over to the game's own...
+#define RT_FADE_END 90.0f    // ...which are all there is past this (no rays: far away, the casters' coarse shapes
+                             // drew lines across what they shadow)
+#define AO_FADE_END 60.0f    // (0.3.21) metres: ambient occlusion's 1.5 m rays end here (less than a pixel past it)
 #define WATER_ID 22     // (0.3.19) the G-buffer's material id of water (rt0's red channel x 255)
 
 typedef struct { VkBuffer buf; VkDeviceMemory mem; VkDeviceSize size; VkDeviceAddress addr; } RBuf;
@@ -43,7 +50,12 @@ static struct {
     uint32_t cap_verts;
     RBuf blas_buf[MAX_CASC], tlas_buf, scratch, inst, ubo;
     VkAccelerationStructureKHR blas[MAX_CASC], tlas;
-    TexBackend vis, copy;  // the rays' result (RGBA8, .r lit, .g through foliage) and a copy of the game's mask
+    TexBackend vis[2], copy;  // the rays' result (RGBA16F: .r lit, .g the game's mask's share, .b ambient
+                              // occlusion, .a the distance - 0.3.21: two, this frame's and the last, its history) and a
+                              // copy of the game's mask
+    int cur;                  // (0.3.21) vis[cur]: this frame's
+    uint64_t hist_frame;      // the frame vis[cur ^ 1] holds (history: from one or two frames before only)
+    float hist_vp[16], hist_cam[3];
     // (0.3.19) the water's reflections: made the first time there's water to reflect in
     bool rf_tried, rf_ok;
     VkDescriptorSetLayout rf_set;
@@ -160,8 +172,9 @@ static const char trace_src[] =
     "layout(local_size_x = 8, local_size_y = 8) in;\n"
     "layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;\n"
     "layout(set = 0, binding = 1) uniform sampler2D dep;\n"
-    "layout(set = 0, binding = 2, rgba8) uniform writeonly image2D vis;\n"
+    "layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D vis;\n"
     "layout(set = 0, binding = 4) uniform sampler2DArray maps;\n"  // the game's cascades (depth): foliage's cut-outs
+    "layout(set = 0, binding = 5) uniform sampler2D hist;\n"      // (0.3.21) the last frame's vis
     "layout(set = 0, binding = 3, std140) uniform U {\n"
     "  mat4 inv_vp;\n"      // (row-major: v * m) the world camera's clip to the world
     "  mat4 casc[8];\n"     // the world to each cascade's clip
@@ -173,6 +186,9 @@ static const char trace_src[] =
     "  vec4 aop;\n"        // x: ambient occlusion's rays' length (metres); y: its rays (0: none)
     "  mat4 vp;\n"         // (0.3.19) the world camera's: the world to its clip (refl_src)
     "  vec4 rfp;\n"        // x: the reflections' rays' length; z: water's material id; w: their strength
+    "  mat4 pvp;\n"        // (0.3.21) the last frame's world camera: the world to its clip
+    "  vec4 pcam;\n"       // xyz: its position; w: 1 - the history (hist) is that frame's
+    "  vec4 tp;\n"         // x: ambient occlusion's last metre; y: the frame (the rays' turn); z, w: the rays' fade (metres)
     "} u;\n"
     // A candidate hit on alpha-tested foliage at H blocks the ray where the game's own map of that cascade - drawn
     // with the leaves' cut-outs - has a surface at least as near the light as H there (within 25 cm): the cut-out was
@@ -201,36 +217,67 @@ static const char trace_src[] =
     "  vec4 w = c * u.inv_vp;\n"
     "  return w.xyz / w.w;\n"
     "}\n"
+    // (0.3.21) The result blended with the last frame's at the same place in the world (the history: reprojected with
+    // that frame's camera, kept where the distance it saw there matches - nothing uncovered since), within 0.5 of this
+    // frame's; where this frame's rays all agree and the history is far off (a shadow that moved), it mostly gives way.
+    "vec4 settle(vec4 cur, vec3 P) {\n"
+    "  if (u.pcam.w < 0.5) return cur;\n"
+    "  vec4 h = vec4(P, 1.0) * u.pvp;\n"
+    "  if (h.w <= 1e-4) return cur;\n"
+    "  vec2 huv = vec2(h.x / h.w * 0.5 + 0.5, h.y / h.w * u.p.x * 0.5 + 0.5);\n"
+    "  if (any(lessThanEqual(huv, vec2(0.0))) || any(greaterThanEqual(huv, vec2(1.0)))) return cur;\n"
+    "  ivec2 hs = textureSize(hist, 0);\n"
+    "  vec4 hv = texelFetch(hist, clamp(ivec2(huv * vec2(hs)), ivec2(0), hs - 1), 0);\n"
+    "  float pd = length(u.pcam.xyz - P);\n"
+    "  if (!(hv.a > 0.0) || abs(hv.a - pd) > 0.03 * pd + 0.08) return cur;\n"
+    "  vec3 hc = clamp(hv.rgb, cur.rgb - 0.5, cur.rgb + 0.5);\n"
+    "  vec3 w = vec3(0.7);\n"
+    "  if ((cur.r < 0.001 || cur.r > 0.999) && abs(hv.r - cur.r) > 0.6) w.r = 0.25;\n"
+    "  return vec4(mix(cur.rgb, hc, w), cur.a);\n"
+    "}\n"
     "void main() {\n"
     "  ivec2 sz = imageSize(vis), px = ivec2(gl_GlobalInvocationID.xy);\n"
     "  if (px.x >= sz.x || px.y >= sz.y) return;\n"
     "  float d = depth_at(px, sz);\n"
     "  if (d >= 0.999999) { imageStore(vis, px, vec4(0.0, 1.0, 1.0, 0.0)); return; }\n"
     "  vec3 P = world(px, sz);\n"
+    "  vec3 V = u.cam.xyz - P;\n"
+    "  float dist = length(V);\n"
+    // past the fade: the game's own shadows (no rays)
+    "  float fade = smoothstep(u.tp.z, u.tp.w, dist);\n"
+    "  if (fade >= 1.0) { imageStore(vis, px, vec4(0.0, 1.0, 1.0, dist)); return; }\n"
     "  vec3 pr = world(px + ivec2(1, 0), sz), pl = world(px - ivec2(1, 0), sz);\n"
     "  vec3 pd = world(px + ivec2(0, 1), sz), pu = world(px - ivec2(0, 1), sz);\n"
     "  vec3 dx = length(pr - P) < length(P - pl) ? pr - P : P - pl;\n"
     "  vec3 dy = length(pd - P) < length(P - pu) ? pd - P : P - pu;\n"
-    "  vec3 V = u.cam.xyz - P;\n"
+    "  vec3 L = normalize(u.sun.xyz);\n"
     "  vec3 N = cross(dx, dy);\n"
     "  N = dot(N, N) > 1e-20 ? normalize(N) : normalize(V);\n"
     "  if (dot(N, V) < 0.0) N = -N;\n"
+    // (0.3.21) Grass, leaves, an edge: the neighbours on both sides far apart for the distance (several pixels' size
+    // there) - a normal from them is noise, flickering frame to frame: the surface taken as facing between the camera
+    // and the sun, so the rays leave a blade from its lit side and don't shadow it by itself
+    "  float foot = dist * 2.0 / float(sz.y);\n"
+    "  if (min(length(dx), length(dy)) > foot * 6.0) N = normalize(normalize(V) + L);\n"
     "  int c = -1;\n"
     "  for (int i = 0; i < int(u.p.z) && c < 0; i++) {\n"
     "    vec4 q = vec4(P, 1.0) * u.casc[i];\n"
     "    if (q.w > 0.0 && abs(q.x) < q.w * 0.995 && abs(q.y) < q.w * 0.995) c = i;\n"
     "  }\n"
-    "  if (c < 0) { imageStore(vis, px, vec4(0.0, 1.0, 1.0, 0.0)); return; }\n"
-    "  vec3 L = normalize(u.sun.xyz);\n"
-    "  float b = u.bias.x + length(V) * u.bias.y;\n"
+    "  if (c < 0) { imageStore(vis, px, vec4(0.0, 1.0, 1.0, dist)); return; }\n"
+    "  float b = u.bias.x + dist * u.bias.y;\n"
     "  vec3 O = P + N * b + L * b;\n"
     "  vec3 T = normalize(cross(abs(L.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0), L));\n"
     "  vec3 B = cross(L, T);\n"
-    "  float a0 = 6.2831853 * fract(52.9829189 * fract(dot(vec2(px), vec2(0.06711056, 0.00583715))));\n"
+    // the rays' turn: the pixel's own (interleaved gradient noise), moved on each frame - the history gathers them
+    "  float fr = u.tp.y;\n"
+    "  float a0 = 6.2831853 * fract(52.9829189 * fract(dot(vec2(px) + 5.588238 * fr, vec2(0.06711056, 0.00583715))));\n"
+    "  float rj = fract(0.5 + fr * 0.7548777);\n"
     "  int n = int(u.p.w);\n"
+    "  if (dist > 25.0) n = max(2, n / 2);\n"   // (half as many far off: fewer pixels' worth on screen)
     "  float lit = 0.0, fol = 0.0;\n"
     "  for (int k = 0; k < n; k++) {\n"
-    "    float r = sqrt((float(k) + 0.5) / float(n)) * u.sun.w, ang = a0 + float(k) * 2.39996323;\n"
+    "    float r = sqrt((float(k) + rj) / float(n)) * u.sun.w, ang = a0 + float(k) * 2.39996323;\n"
     "    vec3 D = normalize(L + (T * cos(ang) + B * sin(ang)) * r);\n"
     "    rayQueryEXT q;\n"
     "    rayQueryInitializeEXT(q, tlas, gl_RayFlagsTerminateOnFirstHitEXT, 1u << c, O, 0.0, D, u.bias.z);\n"
@@ -241,17 +288,17 @@ static const char trace_src[] =
     "      }\n"
     "    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT) lit += 1.0;\n"
     "  }\n"
-    // (0.3.13) Ambient occlusion: AO_RAYS short rays (u.aop.x metres long) over the
-    // hemisphere around the normal, cosine-weighted, against the same cascade's opaque geometry (foliage left out:
-    // its cut-outs are known only toward the sun); a hit near the surface occludes more than one at the rays' end.
-    // .b: the share of the sky the surface sees (1: open)
+    // (0.3.13) Ambient occlusion: short rays (u.aop.x metres long) over the hemisphere around the normal,
+    // cosine-weighted, against the same cascade's opaque geometry (foliage left out: its cut-outs are known only toward
+    // the sun); a hit near the surface occludes more than one at the rays' end. .b: the share of the sky the surface
+    // sees (1: open). (0.3.21: none past u.tp.x metres, faded out before)
     "  float occ = 0.0;\n"
-    "  int na = int(u.aop.y);\n"
+    "  int na = dist < u.tp.x ? int(u.aop.y) : 0;\n"
     "  vec3 TN = normalize(cross(abs(N.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0), N));\n"
     "  vec3 BN = cross(N, TN);\n"
     "  vec3 OA = P + N * b;\n"
     "  for (int k = 0; k < na; k++) {\n"
-    "    float e = (float(k) + 0.5) / float(na), ang = a0 + float(k) * 2.39996323;\n"
+    "    float e = (float(k) + rj) / float(na), ang = a0 + float(k) * 2.39996323;\n"
     "    float s = sqrt(e), z = sqrt(max(0.0, 1.0 - e));\n"
     "    vec3 D = normalize(TN * (cos(ang) * s) + BN * (sin(ang) * s) + N * z);\n"
     "    rayQueryEXT q;\n"
@@ -261,7 +308,10 @@ static const char trace_src[] =
     "      occ += 1.0 - rayQueryGetIntersectionTEXT(q, true) / u.aop.x;\n"
     "  }\n"
     "  float ao = na > 0 ? 1.0 - occ / float(na) : 1.0;\n"
-    "  imageStore(vis, px, vec4(lit / float(n), fol / float(n), ao, 0.0));\n"
+    "  ao = mix(ao, 1.0, smoothstep(u.tp.x * 0.75, u.tp.x, dist));\n"
+    // the fade: the rays' share and the game's mask's
+    "  vec4 cur = vec4(lit / float(n) * (1.0 - fade), fol / float(n) * (1.0 - fade) + fade, ao, dist);\n"
+    "  imageStore(vis, px, settle(cur, P));\n"
     "}\n";
 
 // (0.3.19) Ray-traced reflections on water, at the composited scene (before the HUD). For each pixel the game's
@@ -367,14 +417,15 @@ static bool setup(void) {
     VkDescriptorSetLayoutCreateInfo xl = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
                                           .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR, .bindingCount = 1,
                                           .pBindings = &xb};
-    VkDescriptorSetLayoutBinding tb[5] = {
+    VkDescriptorSetLayoutBinding tb[6] = {
         {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
         {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
         {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
         {3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
-        {4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL}};
+        {4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
+        {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL}};  // (0.3.21: the history)
     VkDescriptorSetLayoutCreateInfo tl = xl;
-    tl.bindingCount = 5, tl.pBindings = tb;
+    tl.bindingCount = 6, tl.pBindings = tb;
     if (vkCreateDescriptorSetLayout(g_vk.dev, &xl, NULL, &R.xform_set) != VK_SUCCESS ||
         vkCreateDescriptorSetLayout(g_vk.dev, &tl, NULL, &R.trace_set) != VK_SUCCESS) {
         snprintf(R.why, sizeof R.why, "its descriptor layouts failed");
@@ -601,7 +652,7 @@ typedef struct {
     VkAccelerationStructureInstanceKHR inst[MAX_CASC];
     int ninst;
     float ubo[UBO_FLOATS];
-    VkImageView depth_view, vis_view, map_view;
+    VkImageView depth_view, vis_view, map_view, hist_view;
     VkImage mask, copy;
     uint32_t w, h;
     // (the handles as of this frame: the main thread may replace R's before the recorder runs this)
@@ -654,7 +705,8 @@ static void run_rt(const void *p) {
     VkDescriptorImageInfo vi = {VK_NULL_HANDLE, b->vis_view, VK_IMAGE_LAYOUT_GENERAL};
     VkDescriptorBufferInfo ui = {b->ubo_buf, 0, sizeof b->ubo};
     VkDescriptorImageInfo mi = {R.nearest, b->map_view, VK_IMAGE_LAYOUT_GENERAL};
-    VkWriteDescriptorSet w[5] = {
+    VkDescriptorImageInfo hi = {R.nearest, b->hist_view, VK_IMAGE_LAYOUT_GENERAL};
+    VkWriteDescriptorSet w[6] = {
         {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .pNext = &wa, .dstBinding = 0, .descriptorCount = 1,
          .descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR},
         {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = 1, .descriptorCount = 1,
@@ -664,8 +716,10 @@ static void run_rt(const void *p) {
         {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = 3, .descriptorCount = 1,
          .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .pBufferInfo = &ui},
         {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = 4, .descriptorCount = 1,
-         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &mi}};
-    R.push_set(cb, VK_PIPELINE_BIND_POINT_COMPUTE, R.trace_layout, 0, 5, w);
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &mi},
+        {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstBinding = 5, .descriptorCount = 1,
+         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &hi}};
+    R.push_set(cb, VK_PIPELINE_BIND_POINT_COMPUTE, R.trace_layout, 0, 6, w);
     vkCmdDispatch(cb, (b->w + 7) / 8, (b->h + 7) / 8, 1);
     // 4. the game's mask, copied for the compose pass to read while it writes the mask
     VkImageCopy ic = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
@@ -708,15 +762,25 @@ bool rts_run(VkCommandBuffer cb, TexBackend *(*scene_depth)(const float *world_c
     }
     if (!mask->image) return false;
     uint32_t w = mask->width, h = mask->height;
-    if (!own_image(&R.vis, w, h, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT) ||
+    // (0.3.21) this frame's result into the other of the two: the one written last frame is the history
+    int cur = R.cur ^ 1;
+    VkImage was[2] = {R.vis[0].image, R.vis[1].image};
+    if (!own_image(&R.vis[0], w, h, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT) ||
+        !own_image(&R.vis[1], w, h, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT) ||
         !own_image(&R.copy, w, h, mask->format, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT))
         return false;
+    static int no_hist = -1;  // (testing: SAVAGEWIND_RTS_HISTORY=0: each frame's rays alone)
+    if (no_hist < 0) no_hist = getenv("SAVAGEWIND_RTS_HISTORY") && !strcmp(getenv("SAVAGEWIND_RTS_HISTORY"), "0");
+    bool hist_ok = !no_hist && was[0] == R.vis[0].image && was[1] == R.vis[1].image && R.hist_frame &&
+                   C.frame > R.hist_frame && C.frame - R.hist_frame <= 2;  // (a frame without the sun's pass between: still near)
     RunBlock *b = calloc(1, sizeof *b);
     if (!b) return false;
     b->cb = cb, b->w = w, b->h = h, b->mask = mask->image, b->copy = R.copy.image;
     static const VkComponentMapping id = {0};
     b->depth_view = vk_image_view(depth, VK_IMAGE_VIEW_TYPE_2D, depth->format, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_DEPTH_BIT);
-    b->vis_view = vk_image_view(&R.vis, VK_IMAGE_VIEW_TYPE_2D, R.vis.format, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
+    b->vis_view = vk_image_view(&R.vis[cur], VK_IMAGE_VIEW_TYPE_2D, R.vis[cur].format, 0, 1, 0, 1, id, VK_IMAGE_ASPECT_COLOR_BIT);
+    b->hist_view = vk_image_view(&R.vis[cur ^ 1], VK_IMAGE_VIEW_TYPE_2D, R.vis[cur ^ 1].format, 0, 1, 0, 1, id,
+                                 VK_IMAGE_ASPECT_COLOR_BIT);
     if (!C.map || !C.map->image) { free(b); return false; }
     b->map_view = vk_image_view(C.map, VK_IMAGE_VIEW_TYPE_2D_ARRAY, C.map->format, 0, 1, 0, C.map->layers ? C.map->layers : 1, id,
                                 VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -832,7 +896,9 @@ bool rts_run(VkCommandBuffer cb, TexBackend *(*scene_depth)(const float *world_c
         // 0.0025, sharper than the sun's disc, as the game's own shadows are near Link)
         cone = e ? (float)atof(e) : 0.0025f;
         e = getenv("SAVAGEWIND_RTS_BIAS");
-        if (!e || sscanf(e, "%f,%f", &bias_m, &bias_d) != 2) bias_m = 0.03f, bias_d = 0.0025f;
+        // (0.3.21: 0.004 a metre of distance, from 0.0025 - further off, the casters' shapes are coarser than what the
+        // camera sees, and the closer offset let them shadow it in lines)
+        if (!e || sscanf(e, "%f,%f", &bias_m, &bias_d) != 2) bias_m = 0.03f, bias_d = 0.004f;
     }
     u[144] = C.sun[0], u[145] = C.sun[1], u[146] = C.sun[2], u[147] = cone;
     u[148] = C.world[47], u[149] = C.world[51], u[150] = C.world[55], u[151] = 0;  // (the camera matrix's position column)
@@ -846,6 +912,18 @@ bool rts_run(VkCommandBuffer cb, TexBackend *(*scene_depth)(const float *world_c
     u[192] = 1.5f, u[193] = ao_wanted() ? AO_RAYS : 0, u[194] = u[195] = 0;
     for (int i = 0; i < 16; i++) u[196 + i] = C.world[12 + i];  // (0.3.19: the world camera's own, for the reflections)
     u[212] = 400.0f, u[213] = 0, u[214] = (float)WATER_ID, u[215] = refl_strength();
+    // (0.3.21) the history: the last frame's camera, where the result it holds was seen from
+    memcpy(u + 216, R.hist_vp, sizeof R.hist_vp);
+    u[232] = R.hist_cam[0], u[233] = R.hist_cam[1], u[234] = R.hist_cam[2], u[235] = hist_ok ? 1.0f : 0.0f;
+    static float fade0 = -1, fade1;  // (testing: SAVAGEWIND_RTS_FADE=<start>,<end> metres)
+    if (fade0 < 0) {
+        const char *e = getenv("SAVAGEWIND_RTS_FADE");
+        if (!e || sscanf(e, "%f,%f", &fade0, &fade1) != 2 || !(fade1 > fade0)) fade0 = RT_FADE_START, fade1 = RT_FADE_END;
+    }
+    u[236] = AO_FADE_END, u[237] = (float)(C.frame % 1024), u[238] = fade0, u[239] = fade1;
+    memcpy(R.hist_vp, C.world + 12, sizeof R.hist_vp);
+    R.hist_cam[0] = C.world[47], R.hist_cam[1] = C.world[51], R.hist_cam[2] = C.world[55];
+    R.hist_frame = C.frame, R.cur = cur;
     // (b is the recorder thread's from here - run_rt frees it: what's needed of it after, read now)
     VkImageView depth_view = b->depth_view, vis_view = b->vis_view;
     float gl_depth = u[153];
@@ -856,7 +934,7 @@ bool rts_run(VkCommandBuffer cb, TexBackend *(*scene_depth)(const float *world_c
             "mask %ux%u, maps %ux%ux%u\n", (unsigned long long)C.frame, C.ndraws, C.nfol, C.missed, tris, C.ncasc, C.layer[0],
             C.layer[1], C.layer[2], w, h, C.map->width, C.map->height, C.map->layers);
     // the compose pass (exec.c): the rays' result, the game's mask, the depth
-    out->mask = mask, out->vis = &R.vis, out->copy = &R.copy, out->depth_view = depth_view;
+    out->mask = mask, out->vis = &R.vis[cur], out->copy = &R.copy, out->depth_view = depth_view;
     memset(out->pc, 0, sizeof out->pc);
     static int view = -1;  // (testing: SAVAGEWIND_RTS_VIEW=1: the rays alone, the foliage lit)
     if (view < 0) view = getenv("SAVAGEWIND_RTS_VIEW") ? atoi(getenv("SAVAGEWIND_RTS_VIEW")) : 0;

@@ -166,6 +166,10 @@ void settings_load(void) {
             for (int i = 0; i < DLSS_MODEL_COUNT; i++)
                 if (!strcmp(val, m[i])) g_settings.dlss_model = i;
         }
+        else if (!strcmp(key, "ps5_resolution")) {  // (auto | 1080p | 1440p | 4k)
+            g_settings.ps5_resolution = !strcmp(val, "1080p") ? PS5RES_1080 : !strcmp(val, "1440p") ? PS5RES_1440
+                                      : !strcmp(val, "4k") ? PS5RES_4K : PS5RES_AUTO;
+        }
         else if (!strcmp(key, "app_icon")) { int n = atoi(val); g_settings.app_icon = n >= 0 && n < 6 ? n : 0; }
         else if (!strcmp(key, "sharpening")) {  // (percent, in steps of 10)
             int p = atoi(val);
@@ -331,6 +335,11 @@ void settings_save(void) {
     else fprintf(f, "dlss_frame_generation = off\n");
     fprintf(f, "lossless_flow = %d\nlossless_performance = %d\napp_icon = %d\n", g_settings.lsfg_flow, g_settings.lsfg_perf,
             g_settings.app_icon);
+    {
+        static const char *const rn[PS5RES_COUNT] = {"auto", "1080p", "1440p", "4k"};
+        int r = g_settings.ps5_resolution;
+        fprintf(f, "ps5_resolution = %s\n", rn[r >= 0 && r < PS5RES_COUNT ? r : 0]);
+    }
     fprintf(f, "dpad_move = %d\n", g_settings.dpad_move);
     fprintf(f, "left_stick_deadzone = %.0f\n", g_settings.stick_deadzone[0] * 100);
     fprintf(f, "right_stick_deadzone = %.0f\n", g_settings.stick_deadzone[1] * 100);
@@ -406,10 +415,18 @@ static bool mode_matches(const Settings *p, const Settings *s) {
     return p->fps_limit == s->fps_limit && p->rt_shadows == s->rt_shadows && p->draw_distance == s->draw_distance &&
            p->shadow_res == s->shadow_res;
 }
-// The TV output to ask for at the start (vulkan/device.c, before the display surface): the TV's own - 4K where it has
-// it (the game drawn at 1440p, AMD FSR up to 2160p: mode_into), else the nearest below (1440p, 1080p) - at 120 Hz
-// where the TV takes it, before a bigger size when frame generation is on (ps5_sdl_want_refresh)
-int settings_ps5_output_height(void) { return 2160; }
+// The TV output to ask for at the start (vulkan/device.c, before the display surface): Video > Resolution's - 1080p
+// (drawn at 1080p), 1440p (drawn at 1440p, native) or 4K (drawn at 1440p, AMD FSR up to 2160p: mode_into) - or with
+// Automatic the TV's own: 4K where it has it, else the nearest below (1440p, 1080p) - at 120 Hz where the TV takes it,
+// before a bigger size when frame generation is on (ps5_sdl_want_refresh). A size chosen comes before 120 Hz.
+int settings_ps5_output_height(void) {
+    switch (g_settings.ps5_resolution) {
+    case PS5RES_1080: return 1080;
+    case PS5RES_1440: return 1440;
+    default: return 2160;
+    }
+}
+bool settings_ps5_output_chosen(void) { return g_settings.ps5_resolution > PS5RES_AUTO && g_settings.ps5_resolution < PS5RES_COUNT; }
 
 // The swapchain's height and the display's refresh rate (vulkan/device.c): the mode in use, if one, set again for them
 void settings_ps5_output(int height, double hz) {

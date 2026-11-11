@@ -1,1 +1,1 @@
-SheikahSlate 993c527ef196247918034d81631bb4d03151867a (2026-11-10) PS5: the light bar follows the hearts as before (fix 17's blue fallback taken back out)
+SheikahSlate cec3b5e4ba7938f7584df529f49fcd27d0fdacbc (2026-11-11) PC/PS5 RT: half the rays a frame with a reprojected history (turned each frame), the shadows faded to the game's from 50 to 90 m, steadier grass, AO to 60 m; PS5 Video > Resolution (Automatic, 1080p, 1440p, 4K)

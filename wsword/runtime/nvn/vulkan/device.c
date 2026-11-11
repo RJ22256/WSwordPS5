@@ -2737,9 +2737,12 @@ void ui_window_init(void) {
         // (settings.c mode_into). WSwordPS5's SDL subset picks the display mode nearest it.)
         extern void ps5_sdl_want_output(int w, int h);
         extern void ps5_sdl_want_refresh(bool high);
+        extern void ps5_sdl_want_size_first(bool first);
         extern int settings_ps5_output_height(void);
+        extern bool settings_ps5_output_chosen(void);
         int h = settings_ps5_output_height();
         ps5_sdl_want_output(h * 16 / 9, h);
+        ps5_sdl_want_size_first(settings_ps5_output_chosen());  // (Video > Resolution chosen: that size before 120 Hz)
         ps5_sdl_want_refresh(g_settings.lsfg > 0 || g_settings.frame_gen);
     }
 #endif
