@@ -1535,7 +1535,7 @@ static void keyboard_draw(ImGuiIO &io, float scale) {
     }
     ImGui::End();
     osk_style_pop(pushed);
-    if (g_kbd.load() != 1) was_open = false;
+    if (g_kbd.load() != 1) was_open = false, osk_system_reset();
 }
 
 // Window size's list, dropped down under the row's button on the game's Options screen (Video), drawn like the game's
@@ -2246,6 +2246,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     }
 
     if (kbd) keyboard_draw(io, scale);
+    else if (!osk_is_open()) osk_system_reset();  // (the game's keyboard gone without a last frame: the console's too)
     if (sizes) size_list_draw(io, scale);
     if (con) console_draw(io, scale, g_font_mono ? g_font_mono : g_font);
     ImGui::Render();

@@ -465,3 +465,145 @@ bool plat_remove_tree(const char *dir) {
 }
 
 void plat_terminate(void) { _exit(0); }
+
+// ---- (0.3.21) The console's own keyboard: the system IME dialog (ui/osk.mm: the on-screen keyboard asks for it first;
+// ours when it can't be had). Its libraries are loaded here at run time rather than linked, so a console without them
+// - or that refuses them to this title - still starts WSword; their layout is the PS4's (OpenOrbis' ime_dialog.h), as
+// the PS5 keeps it. The text goes both ways as UTF-16.
+int sceKernelLoadStartModule(const char *path, size_t argc, const void *argv, uint32_t flags, void *opt, int *res);
+int sceKernelDlsym(int handle, const char *symbol, void **addr);
+int sceUserServiceGetInitialUser(int32_t *user_id);
+
+typedef struct {
+    int32_t user_id;
+    int32_t type;                  // 0: any text
+    uint64_t languages;            // 0: all the console offers
+    int32_t enter_label;           // 0: the console's own
+    int32_t input_method;          // 0
+    void *filter;
+    uint32_t option;
+    uint32_t max_length;           // characters
+    uint16_t *buffer;              // the text: in at the start, out at the end
+    float x, y;                    // the panel's place in 1920 x 1080
+    int32_t halign, valign;        // 1, 1: centred on (x, y)
+    const uint16_t *placeholder;
+    const uint16_t *title;
+    int8_t reserved[16];
+} ImeDialogParam;
+typedef struct { int32_t end; int8_t reserved[12]; } ImeDialogResult;  // end: 0 OK, 1 cancelled, 2 aborted
+
+static struct {
+    int tried, ok;
+    int (*common_init)(void);
+    int (*init)(const void *param, const void *ext);
+    int (*status)(void);
+    int (*result)(ImeDialogResult *r);
+    int (*term)(void);
+    int (*abort_)(void);
+    bool running;
+    uint16_t buf[512], title[128];
+    union { ImeDialogParam p; uint8_t pad[512]; } param;  // (room past the PS4's layout, zero)
+} g_ime;
+
+static int ime_module(const char *name) {
+    static const char *const dirs[] = {"/system/common/lib/", "/system/priv/lib/", ""};
+    for (size_t i = 0; i < sizeof dirs / sizeof *dirs; i++) {
+        char path[160];
+        snprintf(path, sizeof path, "%s%s", dirs[i], name);
+        int res = 0, h = sceKernelLoadStartModule(path, 0, NULL, 0, NULL, &res);
+        if (h >= 0) return h;
+    }
+    return -1;
+}
+
+static bool ime_load(void) {
+    if (g_ime.tried) return g_ime.ok;
+    g_ime.tried = 1;
+    int hc = ime_module("libSceCommonDialog.sprx"), hi = ime_module("libSceImeDialog.sprx");
+    if (hi < 0) {
+        fprintf(stderr, "[ime] the console's keyboard (libSceImeDialog) couldn't be loaded: WSword's own keyboard\n");
+        return false;
+    }
+    if (hc >= 0) sceKernelDlsym(hc, "sceCommonDialogInitialize", (void **)&g_ime.common_init);
+    sceKernelDlsym(hi, "sceImeDialogInit", (void **)&g_ime.init);
+    sceKernelDlsym(hi, "sceImeDialogGetStatus", (void **)&g_ime.status);
+    sceKernelDlsym(hi, "sceImeDialogGetResult", (void **)&g_ime.result);
+    sceKernelDlsym(hi, "sceImeDialogTerm", (void **)&g_ime.term);
+    sceKernelDlsym(hi, "sceImeDialogAbort", (void **)&g_ime.abort_);
+    if (!g_ime.init || !g_ime.status || !g_ime.result || !g_ime.term) {
+        fprintf(stderr, "[ime] the console's keyboard is missing its functions: WSword's own keyboard\n");
+        return false;
+    }
+    if (g_ime.common_init) {
+        int r = g_ime.common_init();
+        if (r < 0 && (uint32_t)r != 0x80B80002u)  // (already initialised: fine)
+            fprintf(stderr, "[ime] sceCommonDialogInitialize: %#x\n", (unsigned)r);
+    }
+    return g_ime.ok = 1;
+}
+
+// UTF-8 to UTF-16 (the Basic Multilingual Plane; anything past it as '?'), at most n - 1 units, ended with 0
+static void utf8_to_16(const char *s, uint16_t *o, size_t n) {
+    size_t k = 0;
+    const unsigned char *p = (const unsigned char *)s;
+    while (*p && k + 1 < n) {
+        uint32_t c = *p++;
+        if (c >= 0xF0) { while ((*p & 0xC0) == 0x80) p++; c = '?'; }
+        else if (c >= 0xE0 && (p[0] & 0xC0) == 0x80 && (p[1] & 0xC0) == 0x80) { c = ((c & 0x0F) << 12) | ((p[0] & 0x3F) << 6) | (p[1] & 0x3F); p += 2; }
+        else if (c >= 0xC0 && (p[0] & 0xC0) == 0x80) { c = ((c & 0x1F) << 6) | (p[0] & 0x3F); p++; }
+        else if (c >= 0x80) c = '?';
+        o[k++] = (uint16_t)c;
+    }
+    o[k] = 0;
+}
+
+bool ps5_ime_open(const char *title, const char *text, int max_chars) {
+    if (g_ime.running || !ime_load()) return g_ime.running;
+    if (max_chars < 1) max_chars = 1;
+    if (max_chars > (int)(sizeof g_ime.buf / 2) - 1) max_chars = (int)(sizeof g_ime.buf / 2) - 1;
+    memset(&g_ime.param, 0, sizeof g_ime.param);
+    utf8_to_16(text ? text : "", g_ime.buf, (size_t)max_chars + 1);
+    utf8_to_16(title ? title : "", g_ime.title, sizeof g_ime.title / 2);
+    int32_t user = -1;
+    if (sceUserServiceGetInitialUser(&user) < 0) user = -1;
+    ImeDialogParam *p = &g_ime.param.p;
+    p->user_id = user, p->max_length = (uint32_t)max_chars, p->buffer = g_ime.buf;
+    p->x = 960, p->y = 540, p->halign = 1, p->valign = 1;
+    p->title = title && *title ? g_ime.title : NULL;
+    int r = g_ime.init(p, NULL);
+    if (r < 0) {
+        static int told;
+        if (told++ < 3) fprintf(stderr, "[ime] sceImeDialogInit: %#x - WSword's own keyboard\n", (unsigned)r);
+        return false;
+    }
+    fprintf(stderr, "[ime] the console's keyboard is up\n");
+    return g_ime.running = true;
+}
+
+// 0 still typing; 1 confirmed (out: the text, UTF-8); -1 cancelled
+int ps5_ime_poll(char *out, size_t cap) {
+    if (!g_ime.running) return -1;
+    int st = g_ime.status();
+    if (st == 1) return 0;  // (running)
+    ImeDialogResult res = {.end = 1};
+    if (st == 2) g_ime.result(&res);  // (finished)
+    g_ime.term();
+    g_ime.running = false;
+    if (res.end != 0) return -1;
+    size_t k = 0;
+    for (const uint16_t *u = g_ime.buf; *u && k + 1 < cap; u++) {
+        uint32_t c = *u;
+        if (c < 0x80) out[k++] = (char)c;
+        else if (c < 0x800) { if (k + 2 >= cap) break; out[k++] = (char)(0xC0 | c >> 6); out[k++] = (char)(0x80 | (c & 0x3F)); }
+        else { if (k + 3 >= cap) break; out[k++] = (char)(0xE0 | c >> 12); out[k++] = (char)(0x80 | ((c >> 6) & 0x3F)); out[k++] = (char)(0x80 | (c & 0x3F)); }
+    }
+    if (cap) out[k] = 0;
+    return 1;
+}
+
+void ps5_ime_close(void) {
+    if (!g_ime.running) return;
+    if (g_ime.abort_) g_ime.abort_();
+    g_ime.term();
+    g_ime.running = false;
+}

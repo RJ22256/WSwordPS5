@@ -106,9 +106,26 @@ int osk_style_push(float scale) {
 void osk_style_pop(int pushed) {
     if (pushed) ImGui::PopStyleVar(pushed & 0xFF), ImGui::PopStyleColor(pushed >> 8);
 }
+#ifdef __PROSPERO__
+// (0.3.21) The console's own keyboard (platform/ps5.c): asked for first each time the keyboard comes up; while it's up
+// ours draws only a line saying so. s_sys: 0 not asked yet, 1 up, 2 not to be had this time (ours instead).
+extern "C" bool ps5_ime_open(const char *title, const char *text, int max_chars);
+extern "C" int ps5_ime_poll(char *out, size_t cap);
+extern "C" void ps5_ime_close(void);
+static int s_sys;
+static char s_sys_title[96];
+void osk_system_reset(void) {
+    if (s_sys == 1) ps5_ime_close();
+    s_sys = 0;
+}
+#else
+void osk_system_reset(void) {}
+#endif
+
 void osk_title(const char *title, ImFont *big) {
 #ifdef __PROSPERO__
     (void)big;
+    snprintf(s_sys_title, sizeof s_sys_title, "%s", title ? title : "");
     ImGui::SetWindowFontScale(1.25f);  // (the menu font, larger: the big font's glyph sizes aren't the menu's)
     ImGui::TextColored(ImVec4(0.92f, 0.94f, 0.97f, 1), "%s", title);
     ImGui::SetWindowFontScale(1.0f);
@@ -161,10 +178,21 @@ int osk_keys(char *text, size_t cap, int max_chars, bool appearing, float scale,
     static bool upper = true;
     if (appearing) upper = upper_first;
     ImGuiIO &io = ImGui::GetIO();
+    if (max_chars <= 0 || max_chars > (int)cap - 1) max_chars = (int)cap - 1;
+#ifdef __PROSPERO__
+    // the console's keyboard first: its answer is the keyboard's
+    if (appearing && s_sys != 1) s_sys = 0;
+    if (s_sys == 0) s_sys = ps5_ime_open(s_sys_title, text, max_chars) ? 1 : 2;
+    if (s_sys == 1) {
+        int r = ps5_ime_poll(text, cap);
+        if (r) { s_sys = 0; return r; }
+        ImGui::TextDisabled("%s", tr("Typing on the PS5's keyboard..."));
+        return 0;
+    }
+#endif
     // B deletes: owning it keeps ImGui's nav cancel (which drops the cursor off the keys) from seeing it
     ImGuiID own = ImGui::GetID("##oskkeys");
     ImGui::SetKeyOwner(ImGuiKey_GamepadFaceRight, own);
-    if (max_chars <= 0 || max_chars > (int)cap - 1) max_chars = (int)cap - 1;
     int len = (int)strlen(text), r = 0;
     auto add = [&](char ch) { if (len < max_chars) text[len++] = ch, text[len] = 0; };
     auto del = [&]() { if (len > 0) text[--len] = 0; };
@@ -267,6 +295,7 @@ int osk_keys(char *text, size_t cap, int max_chars, bool appearing, float scale,
 
 // close it (and give the keyboard back to ImGui's navigation)
 static void finish(int result) {
+    osk_system_reset();  // (cancelled from outside: the console's keyboard closed too)
     if (result > 0 && s.buf && s.size) {
         if (s.flags & ImGuiInputTextFlags_CharsUppercase)
             for (char *p = s.text; *p; p++) *p = (char)toupper((unsigned char)*p);

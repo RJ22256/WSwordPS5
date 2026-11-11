@@ -31,6 +31,8 @@ int osk_keys(char *text, size_t cap, int max_chars, bool appearing, float scale,
 int osk_style_push(float scale);
 void osk_style_pop(int pushed);
 void osk_title(const char *title, ImFont *big);
+// (the PS5) the console's own keyboard, if up, closed - the keyboard was dropped from outside (elsewhere: nothing)
+void osk_system_reset(void);
 #ifdef __PROSPERO__
 void ps_glyph(ImDrawList *dl, ImVec2 c, float r, int kind, float scale);  // (ui/menu.mm) 0 cross, 1 circle, 2 square, 3 triangle
 float ps_pill(ImDrawList *dl, ImVec2 a, float h, const char *text, float scale);

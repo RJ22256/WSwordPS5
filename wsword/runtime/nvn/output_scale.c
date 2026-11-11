@@ -37,9 +37,16 @@ bool dlss_available(void);  // (WSword: vulkan/dlss.h - wsword_dlss.dll, an RTX 
 // FSR 3 upscaling is held back until its cost on the thread that records the frame for Vulkan comes down (the draw
 // translation work in progress): today that thread limits 1080p and 1440p, and FSR 3's motion vectors make every mode
 // slower than native there. SAVAGEWIND_FSR3=1 offers it anyway (tests); TAA and frame generation stay as they are.
+// (WSword 0.3.21) On the PS5 it's offered, and its modes use it in place of FSR 1: the motion vectors it needs are
+// already made there for frame generation, the recorder has room (the console's GPU, not its CPU, is the limit), and
+// AMD's temporal upscaler is far sharper and steadier than FSR 1's (SAVAGEWIND_FSR3=0: held back there too).
 bool fsr3_upscaler_enabled(void) {
     static int on = -1;
+#ifdef __PROSPERO__
+    if (on < 0) on = !(getenv("SAVAGEWIND_FSR3") && atoi(getenv("SAVAGEWIND_FSR3")) == 0);
+#else
     if (on < 0) on = getenv("SAVAGEWIND_FSR3") && atoi(getenv("SAVAGEWIND_FSR3")) != 0;
+#endif
     return on;
 }
 
