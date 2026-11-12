@@ -829,10 +829,9 @@ static void tab_display(void) {
         static const char *k_hdr = "sw:HDR_Look.cube";
         bool on = !strcmp(g_settings.color_lut, k_hdr);
         if (opt_toggle("HDR look", &on, false,
-                       "Makes the picture feel like HDR on any TV: deeper blacks, more contrast in the mid-tones, brighter "
-                       "highlights and richer colour. (Real HDR output isn't available to WSword on the PS5, so this is "
-                       "a standard-range picture made to look like it. On an HDR TV, its own SDR-to-HDR or \"HDR "
-                       "effect\" setting adds to it.) Uses Colour > LUT, so it replaces any LUT chosen there.")) {
+                       "A colour grade that makes the picture feel like HDR: deeper blacks, more contrast in the "
+                       "mid-tones, brighter highlights and richer colour - for an SDR TV (with real HDR, Display > HDR "
+                       "below, it's usually best off). Uses Colour > LUT, so it replaces any LUT chosen there.")) {
             snprintf(g_settings.color_lut, sizeof g_settings.color_lut, "%s", on ? k_hdr : "");
             if (on) g_settings.color_lut_strength = 100;
             g_settings.color_lut_set = true;
@@ -990,7 +989,37 @@ static void tab_display(void) {
         opt_choice("VSync", &g_settings.vsync, names, VSYNC_COUNT, VSYNC_DEFAULT, desc.c_str(), false);
     }
 #endif
-#ifndef __PROSPERO__  // (the PS5: SDR for now)
+#ifdef __PROSPERO__
+    {   // (WSword 0.3.23) the PS5's HDR10 (device.c hdr_wanted; RADV's HDR10 scanout, WSwordPS5's radv-patches)
+        static const char *const names[HDR_COUNT] = {"Automatic", "On", "Off"};
+        opt_choice("HDR", &g_settings.hdr, names, HDR_COUNT, HDR_AUTO,
+                   "Real HDR10 output. Automatic: in HDR when the PS5 sends HDR to the TV (Settings > Screen and Video > "
+                   "Video Output > HDR: On When Supported, on an HDR TV). On: always HDR. Off: always SDR. Changes "
+                   "take effect at once.", false);
+        static const int peaks[] = {0, 400, 600, 800, 1000, 1500};
+        static const char *const pk[] = {"Off", "400 nits", "600 nits", "800 nits", "1000 nits", "1500 nits"};
+        int pi = 3;
+        for (int i = 0; i < 6; i++) if (peaks[i] == g_settings.hdr_peak) pi = i;
+        opt_indent(1);
+        if (g_settings.hdr == HDR_OFF) opt_disable_next();
+        if (opt_choice("HDR highlights", &pi, pk, 6, 3,
+                       "How bright the brightest parts of the picture get in HDR - the sun, the sky, fire, lightning, "
+                       "glints on metal and water - while the rest stays as the game made it. Set it near your TV's "
+                       "peak brightness (the PS5's HDR adjustment screens show it): too high clips them, lower is "
+                       "subtler. Off: no brighter than white.", false))
+            g_settings.hdr_peak = peaks[pi];
+        static const int whites[] = {0, 150, 250, 300};
+        static const char *const wn[] = {"200 nits", "150 nits", "250 nits", "300 nits"};
+        int wi = 0;
+        for (int i = 0; i < 4; i++) if (whites[i] == g_settings.hdr_white) wi = i;
+        if (g_settings.hdr == HDR_OFF) opt_disable_next();
+        if (opt_choice("HDR paper white", &wi, wn, 4, 0,
+                       "How bright white things (the menus, the HUD, a white wall) are in HDR. Raise it for a bright "
+                       "room, lower it for a dark one.", false))
+            g_settings.hdr_white = whites[wi];
+        opt_indent(-1);
+    }
+#else
     {   // HDR (settings.h HDR_*: runtime/nvn/vulkan/device.c hdr_wanted)
         static const char *const names[HDR_COUNT] = {"Automatic", "On", "Off"};
         opt_choice("HDR", &g_settings.hdr, names, HDR_COUNT, HDR_AUTO,
@@ -1007,16 +1036,18 @@ static void tab_display(void) {
 
     opt_section("Rendering");
 #ifdef __PROSPERO__
-    {   // (WSword 0.3.22) the PS5: Off or AMD FSR 3.1 (FSR 1 gone), and its mode. Video > Resolution sets both each time
-        // WSword starts (settings.c mode_into); changed here, they last until then.
-        const char *ups[] = {"Off", "AMD FSR 3"};
-        static const int ups_value[] = {UPSCALE_OFF, UPSCALE_FSR3};
+    {   // (WSword) the PS5: Off, AMD FSR 1 or AMD FSR 3.1, and its mode. Video > Resolution sets the mode each time
+        // WSword starts (settings.c mode_into), and FSR 3 unless FSR 1 was chosen here.
+        const char *ups[] = {"Off", "AMD FSR 1", "AMD FSR 3"};
+        static const int ups_value[] = {UPSCALE_OFF, UPSCALE_FSR1, UPSCALE_FSR3};
         const char *ud = "How the 3D image gets to the TV's resolution. AMD FSR 3 (3.1): the game renders smaller (the "
                          "mode below) and AMD's temporal upscaler builds the full-resolution image from the frames "
                          "before, following the game's motion - sharp, steady and anti-aliased (Anti-aliasing has no "
-                         "effect with it). Off: the game renders at the output's resolution.\n\nVideo > Resolution "
-                         "sets these each time WSword starts (4K and the \"from 1080p\" choices: AMD FSR 3); changed "
-                         "here, they last until then. The HUD and menus always render at the output's resolution.";
+                         "effect with it). AMD FSR 1: edge-aware upscaling and sharpening of each frame on its own - "
+                         "lighter, softer, with Anti-aliasing (SMAA) still applying. Off: the game renders at the "
+                         "output's resolution.\n\nVideo > Resolution sets the mode each time WSword starts (4K and the "
+                         "\"from 1080p\" choices scale up); FSR 1 stays chosen once picked here. The HUD and menus "
+                         "always render at the output's resolution.";
         enum { NU = sizeof ups_value / sizeof ups_value[0] };
         bool avail[NU];
         int ui = 0;
@@ -1033,7 +1064,7 @@ static void tab_display(void) {
         renderer_get_scene_scale(&sx, &sy);
         char rendering[100];
         snprintf(rendering, sizeof rendering, tr("Rendering at %.0f x %.0f."), 1600.0 * sx, 900.0 * sy);
-        std::string md = std::string(tr("How much smaller the game renders before AMD FSR 3 brings it to the output, on "
+        std::string md = std::string(tr("How much smaller the game renders before the upscaler brings it to the output, on "
                                         "each side: Ultra Quality 1.3x, Quality 1.5x, Balanced 1.7x, Performance 2x, "
                                         "Ultra Performance 3x. Smaller is faster and softer.")) + "\n\n" + rendering;
         opt_indent(1);

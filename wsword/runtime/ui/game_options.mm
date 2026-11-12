@@ -148,7 +148,7 @@ static int fg_count(void) {
 #ifdef __APPLE__
 const int k_ups_value[] = {UPSCALE_OFF, UPSCALE_METALFX};
 #elif defined(__PROSPERO__)
-const int k_ups_value[] = {UPSCALE_OFF, UPSCALE_FSR3};  // (WSword 0.3.22: the PS5's only upscaler is AMD FSR 3.1)
+const int k_ups_value[] = {UPSCALE_OFF, UPSCALE_FSR1, UPSCALE_FSR3};  // (WSword: the PS5's - no DLSS there)
 #else
 const int k_ups_value[] = {UPSCALE_OFF, UPSCALE_FSR1, UPSCALE_FSR3, UPSCALE_DLSS};
 #endif

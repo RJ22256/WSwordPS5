@@ -378,7 +378,31 @@ static bool mode_better(const VkDisplayModeParametersKHR *a, const VkDisplayMode
     return ra > rb;
 }
 
+// (0.3.23) Whether the console sends HDR to the TV (Settings > Screen and Video > HDR: "On when supported" on an HDR
+// TV) - VideoOut's output status, read on a handle of its own before RADV opens the output: dynamic range 2 HDR, 1
+// SDR. Video > HDR's Automatic follows it (runtime/nvn/vulkan/device.c hdr_wanted). -1: not known.
+int sceVideoOutOpen(int32_t user, int32_t bus, int32_t index, const void *param);
+int sceVideoOutClose(int32_t handle);
+int sceVideoOutGetOutputStatus(int32_t handle, void *status);
+static int g_tv_hdr = -1;
+static void tv_hdr_probe(void) {
+    static bool done;
+    if (done) return;
+    done = true;
+    int h = sceVideoOutOpen(0xff, 0, 0, NULL);
+    if (h < 0) { fprintf(stderr, "[ps5] HDR: VideoOut not opened for its status (%#x)\n", (unsigned)h); return; }
+    struct { uint32_t resolution, dynamic_range; uint64_t refresh, flags, reserved[5]; } st;
+    memset(&st, 0, sizeof st);
+    int r = sceVideoOutGetOutputStatus(h, &st);
+    sceVideoOutClose(h);
+    if (r == 0 && (st.dynamic_range == 1 || st.dynamic_range == 2)) g_tv_hdr = st.dynamic_range == 2;
+    fprintf(stderr, "[ps5] HDR: the console's output is %s (status %#x, dynamic range %u)\n",
+            g_tv_hdr < 0 ? "not known" : g_tv_hdr ? "HDR" : "SDR", (unsigned)r, st.dynamic_range);
+}
+int ps5_sdl_tv_hdr(void) { return g_tv_hdr; }
+
 bool SDL_Vulkan_CreateSurface(SDL_Window *w, VkInstance inst, const struct VkAllocationCallbacks *alloc, VkSurfaceKHR *out) {
+    tv_hdr_probe();
     uint32_t np = 0;
     VkPhysicalDevice phys[4];
     np = 4;

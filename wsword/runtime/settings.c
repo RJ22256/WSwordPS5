@@ -42,6 +42,7 @@ Settings g_settings = {
     .color_lut_strength = 100,
 #ifdef __PROSPERO__
     .shadow_res = SHADOW_HIGH,  // (the PS5: its Performance mode to start with, settings.c mode_into)
+    .hdr_peak = 800,            // (the PS5's HDR: highlights up to 800 nits - device.c k_hdr_fs)
 #endif
 };
 
@@ -207,6 +208,10 @@ void settings_load(void) {
             int n = atoi(val);
             g_settings.hdr_white = n >= 80 && n <= 1000 ? n : 0;
         }
+        else if (!strcmp(key, "hdr_peak")) {  // (nits; 0: no highlights past paper white)
+            int n = atoi(val);
+            g_settings.hdr_peak = n >= 200 && n <= 4000 ? n : 0;
+        }
         else if (!strcmp(key, "field_of_view")) g_settings.fov = atoi(val);  // (percent)
         else if (!strcmp(key, "draw_distance")) {
             for (int i = 0; i < DRAWDIST_COUNT; i++)
@@ -259,8 +264,8 @@ void settings_load(void) {
     }
 #endif
 #ifdef __PROSPERO__
-    if (g_settings.upscaler == UPSCALE_FSR1 || g_settings.upscaler == UPSCALE_DLSS || g_settings.upscaler == UPSCALE_METALFX)
-        g_settings.upscaler = UPSCALE_FSR3;  // (0.3.22: the console's only upscaler is AMD FSR 3.1)
+    if (g_settings.upscaler == UPSCALE_DLSS || g_settings.upscaler == UPSCALE_METALFX)
+        g_settings.upscaler = UPSCALE_FSR3;  // (not on the console: AMD FSR 3.1, the modes' own)
 #endif
     if (!tip_key) g_settings.menu_tip_seen = true;  // (a settings file from before the note: not a first launch)
     if (g_settings.volume < 0) g_settings.volume = 0;
@@ -368,6 +373,7 @@ void settings_save(void) {
     fprintf(f, "wide_view = %d\n", g_settings.wide_view);
     fprintf(f, "hdr = %s\n", k_hdr[g_settings.hdr >= 0 && g_settings.hdr < HDR_COUNT ? g_settings.hdr : HDR_AUTO]);
     if (g_settings.hdr_white) fprintf(f, "hdr_paper_white = %d\n", g_settings.hdr_white);
+    fprintf(f, "hdr_peak = %d\n", g_settings.hdr_peak);
     fprintf(f, "field_of_view = %d\n", g_settings.fov);
     int dd = g_settings.draw_distance;
     fprintf(f, "draw_distance = %s\n", k_drawdist[dd >= 0 && dd < DRAWDIST_COUNT ? dd : DRAWDIST_ORIGINAL]);
@@ -422,7 +428,8 @@ static void mode_into(Settings *s, int mode) {
     int cap = settings_ps5_render_height_cap(), target = g_ps5_out_h < cap ? g_ps5_out_h : cap;
     double r = (double)g_ps5_out_h / target;
     extern bool upscaler_available(int u);  // (nvn/output_scale.c: FSR 3 where the GPU runs it, else FSR 1)
-    s->upscaler = r <= 1.05 ? UPSCALE_OFF : UPSCALE_FSR3;  // (0.3.22: AMD FSR 3.1, FSR 1 gone on the console)
+    // (AMD FSR 3.1; 0.3.23: FSR 1 kept where the player chose it - Video > Upscaler)
+    s->upscaler = r <= 1.05 ? UPSCALE_OFF : s->upscaler == UPSCALE_FSR1 ? UPSCALE_FSR1 : UPSCALE_FSR3;
     s->upscale_quality = r > 2.5 ? UPQ_ULTRA_PERFORMANCE : r > 1.85 ? UPQ_PERFORMANCE : r > 1.6 ? UPQ_BALANCED
                        : r > 1.4 ? UPQ_QUALITY : r > 1.05 ? UPQ_ULTRA : UPQ_QUALITY;
     g_ps5_q = s->upscale_quality;  // (the mode the output gave: settings_ps5_upscale_factor's exact 1080p for it only)
@@ -457,7 +464,7 @@ void settings_ps5_output(int height, double hz) {
                 m == MODE_QUALITY ? "Quality" : "Performance", height, ihz,
                 height < settings_ps5_render_height_cap() ? height : settings_ps5_render_height_cap(),
                 g_settings.upscaler == UPSCALE_FSR3 ? ", AMD FSR 3 up to the output"
-                : "", g_settings.fps_limit);
+                : g_settings.upscaler == UPSCALE_FSR1 ? ", AMD FSR 1 up to the output" : "", g_settings.fps_limit);
     }
 }
 #else

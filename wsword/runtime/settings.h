@@ -108,6 +108,7 @@ typedef struct {
     bool wide_view;      // a window that isn't 16:9 shows more of the world instead of bars (runtime/nvn/output_scale.c)
     int hdr;             // HDR_* (runtime/nvn/vulkan/device.c hdr_*)
     int hdr_white;       // nits of SDR white in HDR (0: what Windows gives SDR content on that monitor)
+    int hdr_peak;        // (WSword) nits the brightest highlights reach in HDR (0: none past SDR's white - the PC's)
     int fov;             // field of view in play, percent of the game's own (FOV_CHOICES)
     int draw_distance;   // DRAWDIST_*: how far placed actors are kept (runtime/draw_distance.c)
     // Video > Colour (runtime/color_grade.h): 0 everywhere and no LUT = the game's own colours (nothing runs)

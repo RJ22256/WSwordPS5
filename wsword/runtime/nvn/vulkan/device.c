@@ -1106,6 +1106,16 @@ static VkDescriptorSet hdr_sets[8];
 
 // Video > HDR as it stands now: whether the swapchain should be HDR10, and SDR white's nits
 static bool hdr_wanted(float *white) {
+#ifdef __PROSPERO__
+    {   // (WSword 0.3.23) the PS5: Automatic follows the console's own HDR output (sdl_ps5.c: Settings > Screen and
+        // Video > HDR on an HDR TV); SDR white at 200 nits unless chosen. RADV offers HDR10 for a title whose
+        // param.json declares it (WSwordPS5's radv-patches).
+        extern int ps5_sdl_tv_hdr(void);
+        bool on = g_settings.hdr == HDR_ON || (g_settings.hdr == HDR_AUTO && ps5_sdl_tv_hdr() > 0);
+        *white = g_settings.hdr_white ? (float)g_settings.hdr_white : 200;
+        return on && g_cs_ext;
+    }
+#endif
     SDL_PropertiesID p = SDL_GetWindowProperties(window);
     bool on = SDL_GetBooleanProperty(p, SDL_PROP_WINDOW_HDR_ENABLED_BOOLEAN, false);
     float w = SDL_GetFloatProperty(p, SDL_PROP_WINDOW_SDR_WHITE_LEVEL_FLOAT, 0) * 80;  // (scRGB: 1.0 is 80 nits)
@@ -1123,11 +1133,16 @@ static const char k_hdr_vs[] =
 static const char k_hdr_fs[] =
     "#version 450\n"
     "layout(set = 0, binding = 0) uniform sampler2D src;\n"
-    "layout(push_constant) uniform P { float white; float srgb; } pc;\n"
+    "layout(push_constant) uniform P { float white; float srgb; float peak; } pc;\n"
     "layout(location = 0) out vec4 o;\n"
     "void main() {\n"
     "    vec3 c = clamp(texelFetch(src, ivec2(gl_FragCoord.xy), 0).rgb, 0.0, 1.0);\n"
     "    vec3 l = pc.srgb > 0.5 ? mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)) : pow(c, vec3(2.2));\n"
+    // (WSword) highlights: past half of SDR's white (linear), brighter towards pc.peak nits at its white - the sun,
+    // the sky, fire, glints - the rest at paper white as before; the hue kept (each pixel scaled as a whole)
+    "    float Y = dot(l, vec3(0.2126, 0.7152, 0.0722));\n"
+    "    float s = smoothstep(0.5, 1.0, Y);\n"
+    "    l *= pc.peak > pc.white ? 1.0 + (pc.peak / pc.white - 1.0) * s * s : 1.0;\n"
     "    const mat3 to2020 = mat3(0.6274, 0.0691, 0.0164, 0.3293, 0.9195, 0.0880, 0.0433, 0.0114, 0.8956);\n"
     "    vec3 y = pow(clamp(to2020 * l * (pc.white / 10000.0), 0.0, 1.0), vec3(0.1593017578125));\n"
     "    o = vec4(pow((0.8359375 + 18.8515625 * y) / (1.0 + 18.6875 * y), vec3(78.84375)), 1.0);\n"
@@ -1141,7 +1156,7 @@ static bool hdr_pipeline(VkFormat fmt) {
         VkDescriptorSetLayoutCreateInfo di = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1,
                                               .pBindings = &b};
         VK_CHECK(vkCreateDescriptorSetLayout(g_vk.dev, &di, NULL, &hdr_dsl));
-        VkPushConstantRange pr = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, 8};
+        VkPushConstantRange pr = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, 12};
         VkPipelineLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
                                          .pSetLayouts = &hdr_dsl, .pushConstantRangeCount = 1, .pPushConstantRanges = &pr};
         VK_CHECK(vkCreatePipelineLayout(g_vk.dev, &li, NULL, &hdr_layout));
@@ -1306,8 +1321,14 @@ static void create_swapchain(void) {
                                   .pImageInfo = &ii};
         rec_UpdateDescriptorSets(1, &w);
     }
-    if (g_hdr) LOG("[vk] HDR10 output (%s), SDR white at %.0f nits\n",
-                   g_settings.hdr == HDR_ON ? "Video > HDR is On" : "Windows HDR is on for this display", g_hdr_white);
+    if (g_hdr) LOG("[vk] HDR10 output (%s), SDR white at %.0f nits, highlights to %d nits\n",
+                   g_settings.hdr == HDR_ON ? "Video > HDR is On"
+#ifdef __PROSPERO__
+                   : "the PS5's output is HDR",
+#else
+                   : "Windows HDR is on for this display",
+#endif
+                   g_hdr_white, g_settings.hdr_peak > g_hdr_white ? g_settings.hdr_peak : (int)g_hdr_white);
 }
 
 // While the swapchain is HDR10: the frame drawn into image i (8-bit, sRGB-encoded) written into the swapchain's image
@@ -1744,7 +1765,7 @@ static void hdr_write(VkCommandBuffer cb, uint32_t i) {
     rec_CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, hdr_layout, 0, 1, &hdr_sets[i], 0, NULL);
     static int srgb = -1;
     if (srgb < 0) srgb = getenv("SAVAGEWIND_HDR_SRGB") != NULL;
-    float pc[2] = {g_hdr_white, (float)srgb};
+    float pc[3] = {g_hdr_white, (float)srgb, (float)g_settings.hdr_peak};
     rec_CmdPushConstants(cb, hdr_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pc, pc);
     rec_CmdDraw(cb, 3, 1, 0, 0);
     rec_CmdEndRendering(cb);

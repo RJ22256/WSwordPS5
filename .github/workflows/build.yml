@@ -69,7 +69,7 @@ jobs:
             PS5_Vulkan/.deps
             PS5_Vulkan/build/host
             PS5_Vulkan/runtime/libc.prx
-          key: ps5-radv-${{ env.MESA_PIN }}-${{ env.VULKAN_REV }}
+          key: ps5-radv-${{ env.MESA_PIN }}-${{ env.VULKAN_REV }}-${{ hashFiles('WSwordPS5/ps5/wsword/radv-patches/*.patch') }}
           restore-keys: ps5-radv-${{ env.MESA_PIN }}-
       - name: PS5_Mesa at PS5_Vulkan's pin
         run: |
@@ -77,6 +77,17 @@ jobs:
           git init -q && git remote add origin https://github.com/mihawk-99/PS5_Mesa.git
           git fetch -q --depth 1 origin "$MESA_PIN" && git checkout -q FETCH_HEAD
           git log -1 --format='PS5_Mesa %h %ci'
+          # WSword's changes to RADV (ps5/wsword/radv-patches: HDR10 scanout), committed with fixed names and dates so
+          # the commit - the revision build-radv.sh archives and records - is the same on every run (the cache holds)
+          for p in ../WSwordPS5/ps5/wsword/radv-patches/*.patch; do git apply "$p"; echo "applied ${p##*/}"; done
+          git add -A
+          GIT_AUTHOR_NAME=WSword GIT_AUTHOR_EMAIL=wsword@invalid GIT_AUTHOR_DATE='2026-01-01T00:00:00Z' \
+          GIT_COMMITTER_NAME=WSword GIT_COMMITTER_EMAIL=wsword@invalid GIT_COMMITTER_DATE='2026-01-01T00:00:00Z' \
+            git commit -q -m "WSword: RADV patches"
+          patched=$(git rev-parse HEAD)
+          sed -i "s/^mesa_revision=.*/mesa_revision=$patched/" ../PS5_Vulkan/tools/build-radv.sh
+          echo "MESA_PIN=$patched" >> "$GITHUB_ENV"
+          echo "PS5_Mesa with WSword's patches: $patched"
       - name: Payload SDK, native tool, libc.prx, RADV (a long build the first time)
         working-directory: PS5_Vulkan
         run: |
