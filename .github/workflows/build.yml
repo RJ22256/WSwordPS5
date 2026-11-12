@@ -96,7 +96,10 @@ jobs:
           [[ -x build/host/ps5-native-tool && -f runtime/libc.prx ]] || { tail -60 ../make.log; exit 1; }
           prov=.deps/native/radv-release/PROVENANCE.txt
           if [[ "$(sed -n 's/^revision: //p' $prov 2>/dev/null)" != "$MESA_PIN" ]]; then
-            bash tools/build-radv.sh release
+            # (another revision's build tree, restored from the cache: configured afresh - meson's reconfigure of the
+            # restored tree failed with WSword's patched revision)
+            rm -rf .deps/work/radv-build-ps5-release
+            bash tools/build-radv.sh release || { tail -60 .deps/work/radv-build-ps5-release.setup.log 2>/dev/null; exit 1; }
           fi
           ls -la .deps/native/radv-release/lib/
       - name: The template's samples (the toolchain's check)
