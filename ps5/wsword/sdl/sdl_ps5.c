@@ -790,20 +790,43 @@ void ps5_pad_swipes(bool on) {
     g_swipe_on = on;
     pthread_mutex_unlock(&g_pad_lock);
 }
-static void touch_sample(const uint8_t t[24], uint64_t ts_us) {
+// A two-finger tap - two fingers resting on the pad together and lifted within half a second, without clicking it
+// and without sliding - presses the Home button (SDL's Guide) for 60 ms: WSword's menu opens and closes on it
+// (runtime/ui/menu.mm). The game never reads the touch pad's touches, and the PS button itself is the system's, so
+// nothing in the game answers it (the touch pad's click is the game's Minus).
+static uint32_t g_tap_held;
+static uint64_t g_tap_until;
+static void touch_sample(const uint8_t t[24], uint64_t ts_us, bool clicked) {
     static bool down;
-    static int x0, y0, x1, y1;
+    static int x0, y0, x1, y1, most;
+    static int f2x0, f2y0, f2x1, f2y1;  // (the second finger, from when it came)
+    static bool second, pressed;
     static uint64_t t0;
     int n = t[0];
     int x = t[8] | t[9] << 8, y = t[10] | t[11] << 8;
-    if (n > 0 && !down) down = true, x0 = x1 = x, y0 = y1 = y, t0 = ts_us;
-    else if (n > 0) x1 = x, y1 = y;
-    else if (down) {
+    int x2 = t[16] | t[17] << 8, y2 = t[18] | t[19] << 8;
+    if (n > 0 && !down) {
+        down = true, x0 = x1 = x, y0 = y1 = y, t0 = ts_us, most = n, pressed = clicked, second = false;
+    } else if (n > 0) {
+        x1 = x, y1 = y;
+    }
+    if (n > 0) {
+        if (n > most) most = n;
+        pressed |= clicked;
+        if (n >= 2 && !second) second = true, f2x0 = f2x1 = x2, f2y0 = f2y1 = y2;
+        else if (n >= 2) f2x1 = x2, f2y1 = y2;
+    } else if (down) {
         down = false;
         int dx = x1 - x0, dy = y1 - y0;
-        if (g_swipe_on && ts_us - t0 < 700000 && abs(dx) > 450 && abs(dx) > 2 * abs(dy)) {
+        if (g_swipe_on && most == 1 && ts_us - t0 < 700000 && abs(dx) > 450 && abs(dx) > 2 * abs(dy)) {
             g_swipe_held = 1u << (dx > 0 ? SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER : SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
             g_swipe_until = ticks_ns() + 60000000u;
+        }
+        int moved = abs(dx) + abs(dy), moved2 = second ? abs(f2x1 - f2x0) + abs(f2y1 - f2y0) : 0;
+        if (most == 2 && second && !pressed && ts_us - t0 < 500000 && moved < 160 && moved2 < 160) {
+            g_tap_held = 1u << SDL_GAMEPAD_BUTTON_GUIDE;
+            g_tap_until = ticks_ns() + 60000000u;
+            fprintf(stderr, "[ps5] touch pad: two-finger tap (the WSword menu)\n");
         }
     }
 }
@@ -839,6 +862,7 @@ static void pad_read_locked(uint64_t now) {
         g_rumbling = false;
     }
     if (g_swipe_held && now >= g_swipe_until) g_swipe_held = 0;  // (the swipe's tab press: let go)
+    if (g_tap_held && now >= g_tap_until) g_tap_held = 0;        // (the two-finger tap's Home press: let go)
     dualsense_apply_locked(now);
     PadSample s[64];
     int n = scePadRead(g_pad_handle, s, 64);
@@ -855,6 +879,10 @@ static void pad_read_locked(uint64_t now) {
             axes[SDL_GAMEPAD_AXIS_LEFT_TRIGGER] = trigger(s[i].l2);
             axes[SDL_GAMEPAD_AXIS_RIGHT_TRIGGER] = trigger(s[i].r2);
         }
+        // (the touch pad's gestures first: their presses go out as events with the real buttons' - a swipe's L1 / R1,
+        // a two-finger tap's Home)
+        if (ours) touch_sample(s[i].touch, s[i].timestamp_us, (s[i].buttons & PS_TOUCH_PAD) != 0);
+        held |= g_swipe_held | g_tap_held;
         uint32_t changed = held ^ g_held;
         for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; b++)
             if (changed >> b & 1) {
@@ -868,8 +896,6 @@ static void pad_read_locked(uint64_t now) {
                                          .value = axes[a]}};
                 push(&e);
             }
-        if (ours) touch_sample(s[i].touch, s[i].timestamp_us);
-        held |= g_swipe_held;
         g_held = held;
         memcpy(g_axes, axes, sizeof axes);
         if (g_pad_motion && ours) {

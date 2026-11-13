@@ -54,3 +54,15 @@ void opt_desc_image(unsigned long long tex, int w, int h);
 // the next page's first row takes the controller's cursor (Down on the tab bar: ImGui's own pick across the nested
 // panes was unreliable - some tabs went to a row further down, some nowhere). Cleared by the next opt_begin / call.
 void opt_focus_first(bool on);
+
+// (WSword PS5) The console's look for the rows: black and greys, the rows easing in one after another when a page opens,
+// the selected row's highlight fading in and out, switches, sliders and values moving to their new state. No
+// description card: the selected row's name and description are read with opt_console_help() (the menu's foot).
+// regular / medium: the rows' fonts (the selected one in medium); NULL keeps the current font.
+struct ImFont;
+void opt_console_look(bool on, ImFont *regular, ImFont *medium);
+void opt_console_help(const char **name, const char **desc);
+void opt_page_replay(void);  // the next opt_begin plays the rows' entrance again (its category opened again)
+// rows outside a child of their own (opt_begin makes one the page's height): sections and rows mixed with other widgets
+void opt_begin_inline(const char *id, float scale);
+void opt_end_inline(void);

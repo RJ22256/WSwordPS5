@@ -2,6 +2,7 @@
 // the right part of the row - the selected one a navy glass tile outlined in cyan, and the selected / hovered row's
 // name and description in a glass card on the right.
 #include <ctype.h>
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +31,40 @@ static std::vector<unsigned long long> g_img_live;       // the pictures offered
 
 static const ImU32 kCyan = IM_COL32(94, 230, 245, 255);  // (WSword's Glass Slate look: what's picked)
 
+// ---- (WSword PS5) the console's look: see option_rows.h
+static bool g_console;
+static ImFont *g_con_reg, *g_con_med;
+static std::string g_con_name, g_con_desc;  // the row the foot describes
+static double g_page_t0;                    // when the page's rows began to ease in
+static bool g_page_replay;
+static int g_row_index;                     // the rows drawn so far on this page (their entrance is staggered)
+static bool g_is_toggle;                    // (the next row is opt_toggle's: a switch)
+void opt_console_look(bool on, ImFont *regular, ImFont *medium) { g_console = on, g_con_reg = regular, g_con_med = medium; }
+void opt_console_help(const char **name, const char **desc) { *name = g_con_name.c_str(), *desc = g_con_desc.c_str(); }
+void opt_page_replay(void) { g_page_replay = true; }
+static float ease_out(float x) { x = x < 0 ? 0 : x > 1 ? 1 : x; float u = 1 - x; return 1 - u * u * u; }
+static ImU32 fade(ImU32 c, float a) {
+    int al = (int)((c >> IM_COL32_A_SHIFT & 0xff) * (a < 0 ? 0 : a > 1 ? 1 : a) + 0.5f);
+    return (c & ~IM_COL32_A_MASK) | ((ImU32)al << IM_COL32_A_SHIFT);
+}
+static ImU32 mix(ImU32 a, ImU32 b, float t) {
+    ImVec4 x = ImGui::ColorConvertU32ToFloat4(a), y = ImGui::ColorConvertU32ToFloat4(b);
+    return ImGui::ColorConvertFloat4ToU32(ImVec4(x.x + (y.x - x.x) * t, x.y + (y.y - x.y) * t, x.z + (y.z - x.z) * t,
+                                                 x.w + (y.w - x.w) * t));
+}
+static float approach(float cur, float target) {   // a value moving smoothly toward its target (about 150 ms)
+    float k = 1 - expf(-ImGui::GetIO().DeltaTime * 16);
+    float n = cur + (target - cur) * k;
+    return fabsf(n - target) < 0.002f ? target : n;
+}
+// a row's entrance (index i on the page): how far in it is, 0..1
+static float entrance(int i) {
+    float t = (float)(ImGui::GetTime() - g_page_t0) - (i < 12 ? i : 12) * 0.035f;
+    return ease_out(t / 0.36f);
+}
+static const ImU32 kInk = IM_COL32(242, 242, 243, 255), kMuted = IM_COL32(161, 161, 168, 255),
+                   kDim = IM_COL32(110, 110, 118, 255), kSel = IM_COL32(28, 28, 31, 255), kTrack = IM_COL32(44, 44, 49, 255);
+
 // ◀ / ▶ and › (the fonts have no arrow glyphs)
 static void arrow(ImDrawList *dl, float x, float cy, float s, bool right, ImU32 col) {
     if (right) dl->AddTriangleFilled(ImVec2(x + s, cy), ImVec2(x, cy - s * 0.9f), ImVec2(x, cy + s * 0.9f), col);
@@ -55,7 +90,12 @@ void opt_hero_next(const char *sub, const char *key) { g_hero = true, g_hero_sub
 void opt_begin(const char *id, float scale) {
     g_scale = scale;
     static std::string page;  // (another page: its first row's description, not the last page's)
-    if (page != id) page = id, g_desc_shown.clear(), g_name_shown.clear(), g_img_shown = DescImage();
+    if (page != id || g_page_replay) {
+        page = id, g_desc_shown.clear(), g_name_shown.clear(), g_img_shown = DescImage();
+        g_page_t0 = ImGui::GetTime(), g_page_replay = false;
+        g_con_name.clear(), g_con_desc.clear();
+    }
+    g_row_index = 0;
     g_take_first = g_focus_req;
     g_focus_req = false;
     if (g_take_first) ImGui::NavMoveRequestCancel();  // (this frame's Down goes to the first row instead)
@@ -65,10 +105,10 @@ void opt_begin(const char *id, float scale) {
     ImVec2 avail = ImGui::GetContentRegionAvail();
     ImGui::PushID(id);
     // two panes when there is room: the rows, and the description on the right (a narrow window: under the row)
-    g_two_panes = avail.x >= 760 * scale;
+    g_two_panes = avail.x >= 760 * scale && !g_console;  // (the console's look: the description is in the menu's foot)
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));  // (the window's own glass shows through)
     ImGui::BeginChild("##rows", ImVec2(g_two_panes ? avail.x * 0.6f : avail.x, avail.y), ImGuiChildFlags_None,
-                      ImGuiWindowFlags_NavFlattened);
+                      ImGuiWindowFlags_NavFlattened | (g_console ? ImGuiWindowFlags_NoScrollbar : 0));
     ImGui::PopStyleColor();
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 0));  // (rows touch: their lines part them)
     g_desc_first.clear(), g_name_first.clear();
@@ -80,6 +120,16 @@ void opt_section(const char *title) { ui_glass_heading(title, g_scale); }
 // (WSword's Glass Slate look) a section's title: light cyan capitals, a thin navy rule after them
 void ui_glass_heading(const char *title, float s) {
     std::string t = tr_upper(tr(title));
+    if (g_console) {  // (the console's look) small grey capitals, easing in with the rows
+        if (ImGui::GetCursorPosY() > ImGui::GetStyle().WindowPadding.y + 1) ImGui::Dummy(ImVec2(0, 16 * s));
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float fs = ImGui::GetFontSize() * 0.66f, w = ImGui::GetContentRegionAvail().x, e = entrance(g_row_index++);
+        ImFont *f = g_con_reg ? g_con_reg : ImGui::GetFont();
+        ImGui::GetWindowDrawList()->AddText(f, fs, ImVec2(p.x + 22 * s, p.y + 10 * s * (1 - e)), fade(IM_COL32(142, 142, 150, 255), e),
+                                            t.c_str());
+        ImGui::Dummy(ImVec2(w, fs + 10 * s));
+        return;
+    }
     if (ImGui::GetCursorPosY() > ImGui::GetStyle().WindowPadding.y + 1) ImGui::Dummy(ImVec2(0, 14 * s));
     ImVec2 p = ImGui::GetCursorScreenPos();
     float fs = ImGui::GetFontSize() * 0.78f, w = ImGui::GetContentRegionAvail().x;
@@ -106,6 +156,7 @@ static int row(const char *label, const std::string &value, bool changed, const 
     ImVec2 p = ImGui::GetCursorScreenPos();
     float s = g_scale, fs = ImGui::GetFontSize();
     float w = ImGui::GetContentRegionAvail().x, h = hero ? fmaxf(fs * 4.2f, 124 * s) : fmaxf(fs * 2.4f, 62 * s);
+    if (g_console) h = fmaxf(fs * 2.05f, 58 * s);  // (the console's look: no hero card, one row height)
     ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));  // (the row's own frame shows the selection)
     bool clicked = ImGui::InvisibleButton("##row", ImVec2(w, h), ImGuiButtonFlags_EnableNav);
     ImGui::PopStyleColor();
@@ -163,6 +214,89 @@ static int row(const char *label, const std::string &value, bool changed, const 
     if (g_name_first.empty()) g_desc_first = desc ? desc : "", g_name_first = name;
 
     ImDrawList *dl = ImGui::GetWindowDrawList();
+    if (g_console) {  // (WSword PS5) the console's look
+        bool toggle = g_is_toggle, on = g_hero_on;
+        g_is_toggle = false;
+        ImGuiStorage *st = ImGui::GetStateStorage();
+        float e = entrance(g_row_index++), dy = 10 * s * (1 - e);
+        float *fsel = st->GetFloatRef(id + 1, 0), *fknob = st->GetFloatRef(id + 2, on ? 1.0f : 0.0f);
+        float *fbar = st->GetFloatRef(id + 3, bar < 0 ? 0 : bar), *vchange = st->GetFloatRef(id + 5, -10);
+        int *vhash = st->GetIntRef(id + 4, (int)ImHashStr(value.c_str()));
+        *fsel = approach(*fsel, sel ? 1.0f : 0.0f);
+        *fknob = approach(*fknob, on ? 1.0f : 0.0f);
+        if (bar >= 0) *fbar = approach(*fbar, g_drag_id == id ? g_drag : bar);
+        int hsh = (int)ImHashStr(value.c_str());
+        if (hsh != *vhash) *vhash = hsh, *vchange = (float)ImGui::GetTime();
+        float a = e * (off ? 0.45f : 1.0f);
+        ImVec2 r0(p.x + 2 * s, p.y + 2 * s + dy), r1(p.x + w - 2 * s, p.y + h - 2 * s + dy);
+        if (*fsel > 0.01f) {  // the highlight: a lighter grey with a thin light edge, fading in and out
+            dl->AddRectFilled(r0, r1, fade(kSel, *fsel * e), 10 * s);
+            dl->AddRect(r0, r1, fade(kInk, *fsel * e * (foc ? 1.0f : 0.5f) * (off ? 0.5f : 1.0f)), 10 * s, 0, 1.5f * s);
+        }
+        float cy2 = cy + dy, pad2 = 22 * s, right = p.x + w - pad2;
+        ImFont *lf = sel && g_con_med ? g_con_med : g_con_reg ? g_con_reg : ImGui::GetFont();
+        // the value's part, from the right: a switch, a slider and its value, a value between arrows, or an action
+        float vleft = right;
+        if (toggle) {
+            float sw = 52 * s, sh = 30 * s, x0 = right - sw, k = *fknob;
+            ImVec2 t0(x0, cy2 - sh * 0.5f), t1(right, cy2 + sh * 0.5f);
+            dl->AddRectFilled(t0, t1, fade(mix(kTrack, kInk, k), a), sh * 0.5f);
+            float kr = sh * 0.5f - 3 * s, kx = x0 + 3 * s + kr + (sw - 6 * s - 2 * kr) * k;
+            dl->AddCircleFilled(ImVec2(kx, cy2), kr, fade(mix(IM_COL32(142, 142, 150, 255), IM_COL32(10, 10, 11, 255), k), a), 24);
+            vleft = x0;
+        } else if (!value.empty()) {
+            float vfs = fs * 0.95f, vt = (float)ImGui::GetTime() - *vchange, ve = ease_out(vt / 0.22f);
+            ImFont *vf = g_con_reg ? g_con_reg : ImGui::GetFont();
+            float vw = vf->CalcTextSizeA(vfs, FLT_MAX, 0, value.c_str()).x;
+            ImU32 vcol = dim ? kDim : changed ? kInk : kMuted;
+            if (bar >= 0) {  // a slider: its value at the right, the track before it
+                float tw = 104 * s, x1 = right - tw - 18 * s, x0 = x1 - 300 * s * fminf(1.0f, w / (1100 * s));
+                dl->AddText(vf, vfs, ImVec2(right - vw, cy2 - vfs * 0.5f), fade(vcol, a), value.c_str());
+                float by = cy2, fx = x0 + (x1 - x0) * *fbar;
+                dl->AddRectFilled(ImVec2(x0, by - 2 * s), ImVec2(x1, by + 2 * s), fade(kTrack, a), 2 * s);
+                dl->AddRectFilled(ImVec2(x0, by - 2 * s), ImVec2(fx, by + 2 * s), fade(kInk, a), 2 * s);
+                dl->AddCircleFilled(ImVec2(fx, by), (5 + 3 * *fsel) * s, fade(kInk, a), 20);
+                vleft = x0;
+            } else if (arrows) {  // ‹ value ›: the arrows on the selected row; a new value rises into place
+                float aw = 7 * s, gap = 16 * s, cx1 = right - aw, cx0;
+                float vx = cx1 - gap - vw;
+                cx0 = vx - gap - aw;
+                ImU32 acol = fade(kInk, a * *fsel * (off ? 0 : 1));
+                if (*fsel > 0.01f) {
+                    dl->AddLine(ImVec2(cx0 + aw, cy2 - aw), ImVec2(cx0, cy2), acol, 2 * s);
+                    dl->AddLine(ImVec2(cx0, cy2), ImVec2(cx0 + aw, cy2 + aw), acol, 2 * s);
+                    dl->AddLine(ImVec2(cx1, cy2 - aw), ImVec2(cx1 + aw, cy2), acol, 2 * s);
+                    dl->AddLine(ImVec2(cx1 + aw, cy2), ImVec2(cx1, cy2 + aw), acol, 2 * s);
+                }
+                dl->AddText(vf, vfs, ImVec2(vx, cy2 - vfs * 0.5f + 6 * s * (1 - ve)), fade(vcol, a * (0.25f + 0.75f * ve)), value.c_str());
+                vleft = cx0;
+            } else {  // an action: its value in an outlined pill
+                float ph = 36 * s, pw = vw + 36 * s, x0 = right - pw;
+                dl->AddRect(ImVec2(x0, cy2 - ph * 0.5f), ImVec2(right, cy2 + ph * 0.5f), fade(IM_COL32(70, 70, 78, 255), a), ph * 0.5f,
+                            0, 1.2f * s);
+                dl->AddText(vf, vfs, ImVec2(x0 + 18 * s, cy2 - vfs * 0.5f), fade(kInk, a), value.c_str());
+                vleft = x0;
+            }
+        } else {  // a button: a chevron
+            float cs = 6 * s, cx = right - cs;
+            dl->AddLine(ImVec2(cx - cs, cy2 - cs), ImVec2(cx, cy2), fade(kMuted, a), 2 * s);
+            dl->AddLine(ImVec2(cx, cy2), ImVec2(cx - cs, cy2 + cs), fade(kMuted, a), 2 * s);
+            vleft = cx - 2 * cs;
+        }
+        // the label, cut short before the value's part
+        float lx = p.x + pad2, room = vleft - lx - 20 * s;
+        const char *end = name;
+        while (*end) {
+            const char *next = end + 1;
+            while (((unsigned char)*next & 0xc0) == 0x80) ++next;
+            if (lf->CalcTextSizeA(fs, FLT_MAX, 0, name, next).x > room) break;
+            end = next;
+        }
+        dl->AddText(lf, fs, ImVec2(lx, cy2 - fs * 0.52f), fade(off ? kDim : kInk, e), name, end);
+        if (*end) dl->AddText(lf, fs, ImVec2(lx + lf->CalcTextSizeA(fs, FLT_MAX, 0, name, end).x, cy2 - fs * 0.52f), fade(kInk, e), "...");
+        ImGui::PopID();
+        return step;
+    }
     if (hero) {  // (opt_hero_next) a card: the name large, its line under it, the switch and the key on the right
         ImVec2 a(p.x + 2, p.y + 4 * s), b(p.x + w, p.y + h - 10 * s);
         float r = 16 * s, sw = 66 * s, sh = 36 * s, sx = p.x + w - pad - sw, scy = (a.y + b.y) * 0.5f;
@@ -189,7 +323,7 @@ static int row(const char *label, const std::string &value, bool changed, const 
                         1.4f * s);
             dl->AddText(ImGui::GetFont(), kfs, ImVec2(kx0 + 9 * s, scy - kfs * 0.6f), IM_COL32(201, 214, 226, 255), g_hero_key);
         }
-        if (!g_two_panes && foc && desc && *desc) {
+        if (!g_two_panes && !g_console && foc && desc && *desc) {
             ImGui::PushTextWrapPos(0);
             ImGui::TextColored(ImVec4(0.73f, 0.80f, 0.86f, 1), "%s", desc);
             ImGui::PopTextWrapPos();
@@ -237,7 +371,7 @@ static int row(const char *label, const std::string &value, bool changed, const 
         }
     }
     if (!sel || !arrows) chevron(dl, p.x + w - pad * 0.9f, cy, fs * 0.22f, off ? IM_COL32(94, 230, 245, 70) : kCyan);
-    if (!g_two_panes && foc && desc && *desc) {  // (one pane: the description under the selected row)
+    if (!g_two_panes && !g_console && foc && desc && *desc) {  // (one pane: the description under the selected row)
         ImGui::PushTextWrapPos(0);
         ImGui::TextColored(ImVec4(0.73f, 0.80f, 0.86f, 1), "%s", desc);
         ImGui::PopTextWrapPos();
@@ -248,6 +382,7 @@ static int row(const char *label, const std::string &value, bool changed, const 
 
 bool opt_toggle(const char *label, bool *v, bool def, const char *desc) {
     g_hero_on = *v;
+    g_is_toggle = true;
     if (!row(label, tr(*v ? "On" : "Off"), *v != def, desc)) return false;  // (any step flips it)
     *v = !*v;
     return true;
@@ -404,10 +539,35 @@ bool opt_text(const char *label, char *buf, size_t cap, const char *hint, const 
     return done;
 }
 
+static void console_help_pick(void) {  // (the console's look) the row the menu's foot describes
+    if (!g_name_focus.empty()) g_con_name = g_name_focus, g_con_desc = g_desc_focus;
+    else if (!g_name_hover.empty()) g_con_name = g_name_hover, g_con_desc = g_desc_hover;
+    else if (g_con_name.empty()) g_con_name = g_name_first, g_con_desc = g_desc_first;
+}
+
+void opt_begin_inline(const char *id, float scale) {
+    g_scale = scale;
+    static std::string page;
+    if (page != id || g_page_replay) page = id, g_page_t0 = ImGui::GetTime(), g_page_replay = false, g_con_name.clear(), g_con_desc.clear();
+    g_row_index = 0;
+    g_take_first = g_focus_req;
+    g_focus_req = false;
+    g_indent = 0;
+    g_two_panes = false;
+    g_desc_hover.clear(), g_desc_focus.clear(), g_name_hover.clear(), g_name_focus.clear();
+    g_desc_first.clear(), g_name_first.clear();
+    ImGui::PushID(id);
+}
+void opt_end_inline(void) {
+    if (g_console) console_help_pick();
+    ImGui::PopID();
+}
+
 void opt_end(void) {
     ImGui::PopStyleVar();
     if (const char *t = getenv("SAVAGEWIND_OPT_SCROLL")) ImGui::SetScrollY(ImGui::GetScrollMaxY() * (float)atof(t));  // (test)
     ImGui::EndChild();
+    if (g_console) { console_help_pick(); ImGui::PopID(); return; }
     if (!g_two_panes) { ImGui::PopID(); return; }
     // the description: the hovered row (mouse) wins, else the selected one (controller), else the last shown, else the
     // page's first row

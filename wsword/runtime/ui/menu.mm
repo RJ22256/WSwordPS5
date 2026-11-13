@@ -9,6 +9,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <atomic>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -51,6 +52,7 @@ void controls_bindings_draw(float scale);  // controls_ui.mm
 static std::atomic<bool> g_open{false};
 static std::atomic<bool> g_text_busy{false};  // a text field / the on-screen keyboard has the keys (render thread: ui_text_busy)
 static std::atomic<bool> g_want_window_apply{false};  // fullscreen or the window size changed
+static std::atomic<bool> g_close_req{false};  // (the PS5) close with the closing animation (menu_render)
 // (also from the game's Options screen, game_options.mm)
 extern "C" void menu_request_window_apply(void) { g_want_window_apply.store(true); }
 // The window size stepped through (left / right): applied once it stays put a moment, not at every size on the way
@@ -350,11 +352,23 @@ bool menu_handle_event(const SDL_Event *e) {
         bool down = e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
         if (e->gbutton.button == SDL_GAMEPAD_BUTTON_BACK) back_down = down;
         if (e->gbutton.button == SDL_GAMEPAD_BUTTON_START) start_down = down;
+#ifdef __PROSPERO__
+        // (the PS5) the touch pad's two-finger tap only (ps5/wsword/sdl/sdl_ps5.c sends it as Home): touch pad + OPTIONS
+        // were the game's own Minus and Plus too. Closing runs the menu's closing animation first (menu_render).
+        if (down && !typing && overlay_enabled() && e->gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE) {
+            if (g_open.load()) g_close_req.store(true);
+            else set_open(true);
+            return true;
+        }
+        if (e->gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE) return g_open.load();
+        (void)back_down, (void)start_down;
+#else
         if (down && !typing && overlay_enabled() &&
             ((back_down && start_down) || e->gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE)) {
             set_open(!g_open.load());
             return true;
         }
+#endif
         if (!capturing()) return false;
         ImGuiKey k = key_from_pad(e->gbutton.button);
         if (g_sizes.load()) {  // Window size's list (in game): the buttons bound to A and B, wherever they are
@@ -433,6 +447,7 @@ static ImGuiContext *g_ctx;  // ours: the start screen (back to it after a reboo
 static ImFont *g_font, *g_font_big;
 static ImFont *g_font_mono;  // the console (columns line up); NULL: the normal font
 static ImFont *g_menu_font, *g_menu_font_big;  // the menu window (Fira Sans); everything else keeps g_font
+static ImFont *g_sst, *g_sst_med, *g_sst_light;  // (WSword PS5) the console menu's SST, where it's found (NULL: the menu font)
 static int g_tab = -99, g_tab_request = -2;  // (-2: no request; -1 is the start screen's Files; g_tab -99: none yet - the first)
 static int g_focus_tab = -99;  // put the nav cursor on this tab next frame (-100: the selected one; -99: none)
 static int g_focus_frames;
@@ -559,6 +574,36 @@ static void load_fonts(void) {
         g_menu_font = add(med, 29, cfg);
         g_menu_font_big = add(semi, 53.5f, cfg);
     }
+#ifdef __PROSPERO__
+    {   // (WSword PS5) SST, the PS5's typeface, for the in-game menu - never shipped with WSword (it's Sony's): the
+        // player's own copy in the title folder's fonts/ (SSTRg.TTF, SSTMedium.TTF, SSTLight.TTF: the names of the usual
+        // download) or the system's, where it has it. Without it the menu keeps Inter.
+        g_sst = g_sst_med = g_sst_light = NULL;
+        static const char *const dirs[] = {"fonts", "/app0/fonts", "/data/homebrew/PPSA99777/fonts", "/preinst/common/font",
+                                           "/system/common/font", "/system_ex/common_ex/font"};
+        auto find = [&](std::initializer_list<const char *> names, char *out, size_t n) {
+            for (const char *d : dirs)
+                for (const char *f : names) {
+                    snprintf(out, n, "%s/%s", d, f);
+                    if (FILE *fp = fopen(out, "rb")) { fclose(fp); return true; }
+                }
+            return false;
+        };
+        char rp[700], mp[700], lp[700];
+        bool r = find({"SSTRg.TTF", "SSTRg.ttf", "SST-Roman.otf", "SST-Roman.ttf", "SSTRoman.ttf"}, rp, sizeof rp);
+        bool m = find({"SSTMedium.TTF", "SSTMedium.ttf", "SST-Medium.otf", "SST-Medium.ttf"}, mp, sizeof mp);
+        bool l = find({"SSTLight.TTF", "SSTLight.ttf", "SST-Light.otf", "SST-Light.ttf"}, lp, sizeof lp);
+        if (r) g_sst = add(rp, 30, cfg);
+        if (m) g_sst_med = add(mp, 30, cfg);
+        if (l) g_sst_light = add(lp, 58, cfg);
+        else if (r) g_sst_light = add(rp, 58, cfg);
+        static bool said;
+        if (!said) {
+            said = true;
+            fprintf(stderr, "[menu] SST: %s%s%s\n", r ? rp : "none (the menu keeps Inter)", m ? ", medium" : "", l ? ", light" : "");
+        }
+    }
+#endif
     if (!g_font) g_font = io.Fonts->AddFontDefault();
     if (!g_font_big) g_font_big = g_font;
     if (!g_menu_font || !g_menu_font_big) g_menu_font = g_font, g_menu_font_big = g_font_big;
@@ -754,6 +799,7 @@ static void tab_colour(void) {
 }
 #endif
 
+static bool g_colour_own_page;
 static void tab_display(void) {
     float scale = ImGui::GetFontSize() / 34;
     opt_begin("##video", scale);
@@ -1306,7 +1352,7 @@ static void tab_display(void) {
         if (opt_choice("ReShade depth", &dv, dn, 2, 0, dd.c_str(), false)) g_settings.reshade_own_depth = dv == 1;
     }
 #endif
-    tab_colour();
+    if (!g_colour_own_page) tab_colour();  // (WSword PS5's console menu: Colour is a category of its own)
 #endif
     opt_end();
 }
@@ -1357,8 +1403,9 @@ static void tab_language(bool in_game) {
 // Quit: back to the start screen (in game: the game reboots to it) or out to the desktop. Each asks first (progress
 // since the last save is lost); B / Esc or Cancel backs out.
 extern "C" void rt_request_reboot(int kind);  // runtime/main.c (RT_REBOOT_TITLE = 2: the start screen)
+static int g_quit_ask;  // (tab_quit) 0: the two choices; 1: start screen?; 2: desktop?
 static void tab_quit(float scale, bool in_game) {
-    static int ask;  // 0: the two choices; 1: start screen?; 2: desktop?
+    int &ask = g_quit_ask;
     if (ask && (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)))
         ask = 0;
     const char *lost = in_game ? tr("\n\nProgress since your last save is lost.") : "";
@@ -1415,7 +1462,7 @@ static void tab_about(void) {
     ImGui::Spacing();
     header("Menu");
 #ifdef __PROSPERO__
-    ImGui::TextUnformatted(tr("Open / close this menu:  the touch pad + OPTIONS"));
+    ImGui::TextUnformatted(tr("Open / close this menu:  tap the touch pad with two fingers"));
     ImGui::TextUnformatted(tr("Switch tabs:  L1 / R1        Choose:  Cross        Back:  Circle"));
 #else
     ImGui::TextUnformatted(tr("Open / close this menu:  F1, Esc, the controller's Home / Xbox / PlayStation button, or Back + Start"));
@@ -1867,7 +1914,7 @@ static void quick_toggles(ImDrawList *dl, ImVec2 a, ImVec2 b, float scale) {
 #ifdef __PROSPERO__
 // (the PS5) The in-game menu as a console's: the whole screen, the pages as a row of tabs across the top between L1 and
 // R1, the open page below at the full width, and the buttons' prompts along the foot - Cross choose, Circle back, L1 /
-// R1 tabs, touch pad + OPTIONS close. Drawn with the console's own button shapes.
+// R1 tabs, a two-finger tap on the touch pad closes. Drawn with the console's own button shapes.
 void ps_glyph(ImDrawList *dl, ImVec2 c, float r, int kind, float scale) {  // 0 cross, 1 circle, 2 square, 3 triangle
     const ImU32 col = IM_COL32(236, 242, 248, 255);
     float w = 2.2f * scale, k = r * 0.55f;
@@ -1890,7 +1937,7 @@ static void console_prompts(ImDrawList *dl, ImVec2 a, ImVec2 b, float scale) {
     float h = b.y - a.y, fs = ImGui::GetFontSize() * 0.8f, r = h * 0.3f, x = b.x;
     const ImU32 txt = IM_COL32(214, 226, 238, 255);
     struct { int glyph; const char *pill, *label; } items[] = {
-        {-1, "TOUCH PAD + OPTIONS", "Close"}, {-1, "L1 / R1", "Tabs"}, {1, NULL, "Back"}, {0, NULL, "Choose"}};
+        {-1, "TWO-FINGER TAP", "Close"}, {-1, "L1 / R1", "Tabs"}, {1, NULL, "Back"}, {0, NULL, "Choose"}};
     for (auto &it : items) {  // (from the right)
         const char *l = tr(it.label);
         float lw = ImGui::GetFont()->CalcTextSizeA(fs, FLT_MAX, 0, l).x;
@@ -1983,6 +2030,407 @@ static void console_tabs_body(float scale, bool in_game) {
     dl->AddText(g_font_big, g_font_big->FontSize * ImGui::GetIO().FontGlobalScale * 0.55f, ImVec2(p.x + 6 * scale, fy + 10 * scale),
                 IM_COL32(143, 217, 230, 255), "WSword");
     g_tab_request = -2;
+}
+#endif
+
+#ifdef __PROSPERO__
+// ------------------------------------------------------------------ (WSword PS5) the console menu
+// Opened and closed by a two-finger tap on the touch pad (menu_handle_event). In the PS5's own manner and WSword's
+// black: first the quick menu - a sheet rising from the bottom over the dimmed game, its tiles following one after
+// another (Resume, Mode, Ray-Tracing, Frame generation, Performance overlay) and a ring gliding to the chosen one;
+// All settings opens the full settings - every option of the menu before it, in categories down the left (L1 / R1,
+// a bar gliding to the open one) and their rows easing in on the right (runtime/ui/option_rows.mm, the console look),
+// the selected row's description along the foot. Circle goes back a step; closing lets the sheet sink away first.
+// Motion: ease-out (cubic), 220-380 ms, nothing that bounces or zooms.
+enum { CV_QUICK, CV_SETTINGS };
+static int g_cview;
+static double g_open_at, g_view_at, g_close_at = -1;
+static bool g_was_open;
+static int g_ccat;               // the open category (k_ccats)
+static float g_cbar = -1;        // the categories' bar (its y, gliding)
+static ImVec4 g_ring(-1, 0, 0, 0);  // the quick menu's ring (x0, y0, x1, y1), gliding
+static int g_cfocus = 0;         // frames left to put the cursor on g_cfocus_on
+static int g_cfocus_on;          // 0: Resume, 5: All settings
+static double g_help_at;         // when the foot's description last changed
+static std::string g_help_name;
+struct CCat { const char *name; int id; };
+static const CCat k_ccats[] = {{"Video", 0}, {"Colour", 10}, {"Audio", 1}, {"Controls", 8}, {"Language", 2}, {"Mods", 4}, {"Quit", 9}};
+enum { NCCATS = sizeof k_ccats / sizeof *k_ccats };
+
+static float c_ease(float x) { x = x < 0 ? 0 : x > 1 ? 1 : x; float u = 1 - x; return 1 - u * u * u; }
+static ImU32 c_fade(ImU32 c, float a) {
+    int al = (int)((c >> IM_COL32_A_SHIFT & 0xff) * (a < 0 ? 0 : a > 1 ? 1 : a) + 0.5f);
+    return (c & ~IM_COL32_A_MASK) | ((ImU32)al << IM_COL32_A_SHIFT);
+}
+static float c_approach(float cur, float target, float rate = 16) {
+    float n = cur + (target - cur) * (1 - expf(-ImGui::GetIO().DeltaTime * rate));
+    return fabsf(n - target) < 0.05f ? target : n;
+}
+static ImFont *c_reg(void) { return g_sst ? g_sst : g_menu_font; }
+static ImFont *c_med(void) { return g_sst_med ? g_sst_med : g_sst ? g_sst : g_menu_font; }
+static ImFont *c_light(void) { return g_sst_light ? g_sst_light : g_menu_font_big; }
+static void c_text(ImDrawList *dl, ImFont *f, float size, ImVec2 at, ImU32 col, const char *t) { dl->AddText(f, size, at, col, t); }
+static float c_width(ImFont *f, float size, const char *t) { return f->CalcTextSizeA(size, FLT_MAX, 0, t).x; }
+
+// the two-finger tap's mark: the touch pad with two dots
+static void c_tap_glyph(ImDrawList *dl, ImVec2 c, float s, ImU32 col) {
+    float w = 15 * s, h = 10 * s;
+    dl->AddRect(ImVec2(c.x - w, c.y - h), ImVec2(c.x + w, c.y + h), col, 4 * s, 0, 1.5f * s);
+    dl->AddCircleFilled(ImVec2(c.x - 4.5f * s, c.y), 2.6f * s, col, 12);
+    dl->AddCircleFilled(ImVec2(c.x + 4.5f * s, c.y), 2.6f * s, col, 12);
+}
+// prompts from the right edge: {glyph (0 cross, 1 circle, -1 pill, -2 the tap), pill text, label}
+struct CPrompt { int glyph; const char *pill, *label; };
+static void c_prompts(ImDrawList *dl, float right, float cy, float s, const CPrompt *p, int n, float a) {
+    float fs = 19 * s, x = right;
+    ImFont *f = c_reg();
+    ImU32 txt = c_fade(IM_COL32(200, 200, 206, 255), a);
+    for (int i = 0; i < n; i++) {
+        const char *l = tr(p[i].label);
+        x -= c_width(f, fs, l);
+        dl->AddText(f, fs, ImVec2(x, cy - fs * 0.55f), txt, l);
+        x -= 10 * s;
+        if (p[i].glyph >= 0) { x -= 11 * s; ps_glyph(dl, ImVec2(x, cy), 11 * s, p[i].glyph, s); x -= 11 * s; }
+        else if (p[i].glyph == -2) { x -= 15 * s; c_tap_glyph(dl, ImVec2(x, cy), s, txt); x -= 15 * s; }
+        else {
+            float ph = 24 * s, pw = ImGui::GetFont()->CalcTextSizeA(ph * 0.62f, FLT_MAX, 0, p[i].pill).x + ph * 0.9f;
+            x -= pw;
+            ps_pill(dl, ImVec2(x, cy - ph * 0.5f), ph, p[i].pill, s);
+        }
+        x -= 30 * s;
+    }
+}
+
+static void c_close(void) { if (g_close_at < 0) g_close_at = ImGui::GetTime(); }
+static void c_open_settings(int cat) {
+    g_cview = CV_SETTINGS, g_view_at = ImGui::GetTime(), g_ccat = cat;
+    g_quit_ask = 0;
+    opt_page_replay();
+    opt_focus_first(true);
+}
+static void c_back_to_quick(void) {
+    g_cview = CV_QUICK, g_view_at = ImGui::GetTime();
+    g_cfocus = 4, g_cfocus_on = 5;  // (the cursor back on All settings)
+}
+
+// A switch, as the rows' (option_rows.mm): k 0 off .. 1 on
+static void c_switch(ImDrawList *dl, ImVec2 right_mid, float s, float k, float a) {
+    float sw = 52 * s, sh = 30 * s, x0 = right_mid.x - sw, cy = right_mid.y;
+    ImVec4 t0 = ImGui::ColorConvertU32ToFloat4(IM_COL32(46, 46, 51, 255)), t1(0.95f, 0.95f, 0.953f, 1);
+    ImU32 track = ImGui::ColorConvertFloat4ToU32(ImVec4(t0.x + (t1.x - t0.x) * k, t0.y + (t1.y - t0.y) * k, t0.z + (t1.z - t0.z) * k, a));
+    dl->AddRectFilled(ImVec2(x0, cy - sh * 0.5f), ImVec2(right_mid.x, cy + sh * 0.5f), track, sh * 0.5f);
+    float kr = sh * 0.5f - 3 * s, kx = x0 + 3 * s + kr + (sw - 6 * s - 2 * kr) * k;
+    float g = 0.56f - 0.52f * k;
+    dl->AddCircleFilled(ImVec2(kx, cy), kr, ImGui::ColorConvertFloat4ToU32(ImVec4(g, g, g + 0.03f, a)), 24);
+}
+// A segmented choice: names[n], the pill gliding to cur (*pill: its animated position)
+static void c_segments(ImDrawList *dl, ImVec2 a0, ImVec2 a1, float s, const char *const *names, int n, int cur, float *pill, float a) {
+    dl->AddRectFilled(a0, a1, c_fade(IM_COL32(12, 12, 14, 255), a), 9 * s);
+    float w = (a1.x - a0.x - 6 * s) / n;
+    if (cur >= 0) {
+        *pill = *pill < 0 ? (float)cur : c_approach(*pill, (float)cur, 14);
+        float px = a0.x + 3 * s + w * *pill;
+        dl->AddRectFilled(ImVec2(px, a0.y + 3 * s), ImVec2(px + w, a1.y - 3 * s), c_fade(IM_COL32(46, 46, 51, 255), a), 7 * s);
+    }
+    float fs = 18 * s;
+    for (int i = 0; i < n; i++) {
+        const char *t = tr(names[i]);
+        float tw = c_width(c_reg(), fs, t), cx = a0.x + 3 * s + w * (i + 0.5f);
+        dl->AddText(c_reg(), fs, ImVec2(cx - tw * 0.5f, (a0.y + a1.y) * 0.5f - fs * 0.55f),
+                    c_fade(i == cur ? IM_COL32(242, 242, 243, 255) : IM_COL32(142, 142, 150, 255), a), t);
+    }
+}
+
+static void c_quick(ImGuiIO &io, float s, float closing) {
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    double now = ImGui::GetTime(), base = g_cview == CV_QUICK && g_view_at > g_open_at ? g_view_at : g_open_at;
+    float k = c_ease((float)(now - base) / 0.38f), a = k * (1 - closing);
+    float W = io.DisplaySize.x, H = io.DisplaySize.y;
+    ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, c_fade(IM_COL32(0, 0, 0, 150), a));
+    float dy = 44 * s * (1 - k) + 28 * s * c_ease(closing);
+    float x0 = 64 * s, x1 = W - 64 * s, y1 = H - 48 * s + dy, h = 336 * s, y0 = y1 - h, pad = 34 * s;
+    dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), c_fade(IM_COL32(10, 10, 11, 242), a), 22 * s);
+    dl->AddRect(ImVec2(x0, y0), ImVec2(x1, y1), c_fade(IM_COL32(38, 38, 42, 255), a), 22 * s, 0, 1.2f * s);
+    // the title
+    float ts = 40 * s;
+    c_text(dl, c_light(), ts, ImVec2(x0 + pad, y0 + 26 * s), c_fade(IM_COL32(242, 242, 243, 255), a), tr("Quick menu"));
+    float tw = c_width(c_light(), ts, tr("Quick menu"));
+    c_text(dl, c_med(), 15 * s, ImVec2(x0 + pad + tw + 18 * s, y0 + 26 * s + ts * 0.55f), c_fade(IM_COL32(142, 142, 150, 255), a), "WSWORD");
+    const char *note = tr("Changes apply at once");
+    c_text(dl, c_reg(), 18 * s, ImVec2(x1 - pad - c_width(c_reg(), 18 * s, note), y0 + 26 * s + ts * 0.42f),
+           c_fade(IM_COL32(161, 161, 168, 255), a), note);
+    // the tiles
+    int fv = g_settings.dlssg > 0 ? 4 + g_settings.dlssg : g_settings.lsfg > 0 ? 1 + g_settings.lsfg : g_settings.frame_gen ? 1 : 0;
+    static int fg_last = 1;  // (frame generation turned back on: the last one on this session, else AMD FSR 3)
+    if (fv) fg_last = fv;
+    int mode = settings_current_mode();
+    bool rt_ok = rts_available(), rt = g_settings.rt_shadows && rt_ok;
+    static float k_rt = -1, k_fg = -1, pill_mode = -1, pill_ov = -1;
+    if (k_rt < 0) k_rt = rt, k_fg = fv != 0;
+    k_rt = c_approach(k_rt, rt ? 1.0f : 0.0f), k_fg = c_approach(k_fg, fv ? 1.0f : 0.0f);
+    float gap = 14 * s, ty0 = y0 + 96 * s, th = 150 * s, tw5 = (x1 - x0 - 2 * pad - 4 * gap) / 5;
+    ImVec4 target = g_ring;
+    bool any_hot = false;
+    for (int i = 0; i < 5; i++) {
+        float e = c_ease((float)(now - base - 0.06 - i * 0.04) / 0.34f) * (1 - closing), tdy = 12 * s * (1 - e);
+        ImVec2 a0(x0 + pad + i * (tw5 + gap), ty0 + tdy), a1(a0.x + tw5, a0.y + th);
+        ImGui::SetCursorScreenPos(ImVec2(a0.x, ty0));
+        ImGui::PushID(i);
+        if (g_cfocus > 0 && g_cfocus_on == i) { ImGui::SetKeyboardFocusHere(); ImGui::SetNavCursorVisible(true); g_cfocus--; }
+        ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));
+        bool clicked = ImGui::InvisibleButton("##tile", ImVec2(tw5, th), ImGuiButtonFlags_EnableNav);
+        ImGui::PopStyleColor();
+        bool hot = (ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible) || ImGui::IsItemHovered();
+        ImGui::PopID();
+        if (hot) target = ImVec4(a0.x, a0.y, a1.x, a1.y), any_hot = true;
+        ImU32 bg = i == 0 ? IM_COL32(242, 242, 243, 255) : IM_COL32(24, 24, 27, 255);
+        dl->AddRectFilled(a0, a1, c_fade(bg, e), 16 * s);
+        float lx = a0.x + 20 * s, ly = a0.y + 20 * s, lfs = 17 * s;
+        ImU32 label = c_fade(IM_COL32(161, 161, 168, 255), e), ink = c_fade(IM_COL32(242, 242, 243, 255), e);
+        switch (i) {
+        case 0: {  // Resume
+            ImU32 black = c_fade(IM_COL32(0, 0, 0, 255), e);
+            dl->AddTriangleFilled(ImVec2(lx, ly), ImVec2(lx, ly + 22 * s), ImVec2(lx + 18 * s, ly + 11 * s), black);
+            c_text(dl, c_med(), 24 * s, ImVec2(lx, a1.y - 20 * s - 26 * s), black, tr("Resume"));
+            if (clicked) c_close();
+            break;
+        }
+        case 1: {  // Mode: Performance / Quality (Custom when the options match neither)
+            static const char *const mn[] = {"Performance", "Quality"};
+            c_text(dl, c_reg(), lfs, ImVec2(lx, ly), label, tr(mode < MODE_COUNT ? "Mode" : "Mode: Custom"));
+            c_segments(dl, ImVec2(lx, a1.y - 20 * s - 40 * s), ImVec2(a1.x - 20 * s, a1.y - 20 * s), s, mn, 2,
+                       mode < MODE_COUNT ? mode : -1, &pill_mode, e);
+            if (clicked) { settings_apply_mode(mode == MODE_PERFORMANCE ? MODE_QUALITY : MODE_PERFORMANCE); settings_save(); }
+            break;
+        }
+        case 2: {  // Ray-Tracing
+            c_text(dl, c_reg(), lfs, ImVec2(lx, ly), label, tr("Ray-Tracing"));
+            c_text(dl, c_reg(), 22 * s, ImVec2(lx, a1.y - 20 * s - 26 * s), rt_ok ? ink : label,
+                   tr(!rt_ok ? "Not available" : rt ? "On" : "Off"));
+            if (rt_ok) c_switch(dl, ImVec2(a1.x - 20 * s, a1.y - 20 * s - 15 * s), s, k_rt, e);
+            if (clicked && rt_ok) { g_settings.rt_shadows = !g_settings.rt_shadows; settings_save(); }
+            break;
+        }
+        case 3: {  // Frame generation (the last one used, else AMD FSR 3)
+            static const char *const fgs[] = {"Off", "AMD FSR 3", "Lossless 2x", "Lossless 3x", "Lossless 4x", "DLSS 2x", "DLSS 3x", "DLSS 4x"};
+            c_text(dl, c_reg(), lfs, ImVec2(lx, ly), label, tr("Frame generation"));
+            c_text(dl, c_reg(), 22 * s, ImVec2(lx, a1.y - 20 * s - 26 * s), ink, tr(fgs[fv < 8 ? fv : 0]));
+            c_switch(dl, ImVec2(a1.x - 20 * s, ly + 15 * s + 30 * s), s, k_fg, e);
+            if (clicked) {
+                int nv = fv ? 0 : fg_last, before = settings_current_mode();
+                g_settings.frame_gen = nv == 1;
+                g_settings.lsfg = nv >= 2 && nv <= 4 ? nv - 1 : 0;
+                g_settings.dlssg = nv >= 5 ? nv - 4 : 0;
+                if (before < MODE_COUNT) settings_apply_mode(before);  // (Quality: 30 or 60 on screen)
+                settings_save();
+            }
+            break;
+        }
+        case 4: {  // Performance overlay
+            static const char *const on[] = {"Off", "FPS", "Full"};
+            c_text(dl, c_reg(), lfs, ImVec2(lx, ly), label, tr("Performance overlay"));
+            c_segments(dl, ImVec2(lx, a1.y - 20 * s - 40 * s), ImVec2(a1.x - 20 * s, a1.y - 20 * s), s, on, 3,
+                       g_settings.perf_overlay % 3, &pill_ov, e);
+            if (clicked) { g_settings.perf_overlay = (g_settings.perf_overlay + 1) % 3; settings_save(); }
+            break;
+        }
+        }
+    }
+    // All settings and Quit, the prompts at the right
+    float by = ty0 + th + 22 * s, bh = 50 * s, bx = x0 + pad;
+    const char *labels[2] = {tr("All settings"), tr("Quit")};
+    for (int i = 0; i < 2; i++) {
+        float e = c_ease((float)(now - base - 0.26 - i * 0.03) / 0.34f) * (1 - closing);
+        float bw = c_width(c_reg(), 19 * s, labels[i]) + (i == 0 ? 60 : 40) * s;
+        ImGui::SetCursorScreenPos(ImVec2(bx, by));
+        ImGui::PushID(10 + i);
+        if (g_cfocus > 0 && g_cfocus_on == 5 + i) { ImGui::SetKeyboardFocusHere(); ImGui::SetNavCursorVisible(true); g_cfocus--; }
+        ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));
+        bool clicked = ImGui::InvisibleButton("##btn", ImVec2(bw, bh), ImGuiButtonFlags_EnableNav);
+        ImGui::PopStyleColor();
+        bool hot = (ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible) || ImGui::IsItemHovered();
+        ImGui::PopID();
+        float bdy = 12 * s * (1 - e);
+        ImVec2 a0(bx, by + bdy), a1(bx + bw, by + bh + bdy);
+        if (hot) target = ImVec4(a0.x, a0.y, a1.x, a1.y), any_hot = true;
+        dl->AddRectFilled(a0, a1, c_fade(IM_COL32(24, 24, 27, 255), e), 12 * s);
+        dl->AddRect(a0, a1, c_fade(IM_COL32(44, 44, 49, 255), e), 12 * s, 0, 1.2f * s);
+        c_text(dl, c_reg(), 19 * s, ImVec2(a0.x + 20 * s, (a0.y + a1.y) * 0.5f - 19 * s * 0.55f), c_fade(IM_COL32(242, 242, 243, 255), e), labels[i]);
+        if (i == 0) {
+            float cx = a1.x - 22 * s, cy = (a0.y + a1.y) * 0.5f, cs = 5 * s;
+            dl->AddLine(ImVec2(cx - cs, cy - cs), ImVec2(cx, cy), c_fade(IM_COL32(142, 142, 150, 255), e), 2 * s);
+            dl->AddLine(ImVec2(cx, cy), ImVec2(cx - cs, cy + cs), c_fade(IM_COL32(142, 142, 150, 255), e), 2 * s);
+        }
+        if (clicked) c_open_settings(i == 0 ? 0 : NCCATS - 1);
+        bx += bw + 12 * s;
+    }
+    static const CPrompt pr[] = {{-2, NULL, "Close"}, {1, NULL, "Resume"}, {0, NULL, "Select"}};
+    c_prompts(dl, x1 - pad, by + bh * 0.5f, s, pr, 3, a);
+    // the ring: glides to the tile or button the cursor is on
+    if (any_hot) {
+        if (g_ring.x < 0) g_ring = target;
+        g_ring.x = c_approach(g_ring.x, target.x, 18), g_ring.y = c_approach(g_ring.y, target.y, 18);
+        g_ring.z = c_approach(g_ring.z, target.z, 18), g_ring.w = c_approach(g_ring.w, target.w, 18);
+        float ra = c_ease((float)(now - base - 0.26) / 0.3f) * (1 - closing);
+        ImVec2 r0(g_ring.x - 3 * s, g_ring.y - 3 * s), r1(g_ring.z + 3 * s, g_ring.w + 3 * s);
+        dl->AddRect(ImVec2(r0.x - 4 * s, r0.y - 4 * s), ImVec2(r1.x + 4 * s, r1.y + 4 * s), c_fade(IM_COL32(242, 242, 243, 22), ra), 22 * s, 0, 6 * s);
+        dl->AddRect(r0, r1, c_fade(IM_COL32(242, 242, 243, 255), ra), 18 * s, 0, 2.2f * s);
+    }
+}
+
+static void console_controls(float rs) {  // the Controls category: the d-pad, the buttons' bindings, the menu's tap
+    opt_begin_inline("##controls", rs);
+    opt_section("Movement");
+    opt_toggle("D-pad as left stick", &g_settings.dpad_move, false,
+               "The d-pad (and the arrow keys) also move like the left stick while the stick is at rest.");
+    opt_section("Buttons");
+    controls_bindings_draw(ImGui::GetFontSize() / 34);
+    opt_section("Menu");
+    opt_action("Open or close this menu", tr("Two-finger tap"), "Rest two fingers on the touch pad, without clicking it, and lift "
+               "them. The game never reads the touch pad's touches, so nothing in it answers.", false);
+    opt_end_inline();
+}
+
+static void c_settings(ImGuiIO &io, float s, float closing) {
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    double now = ImGui::GetTime();
+    float k = c_ease((float)(now - g_view_at) / 0.38f), a = k * (1 - closing), dx = 18 * s * (1 - k);
+    float W = io.DisplaySize.x, H = io.DisplaySize.y;
+    ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, c_fade(IM_COL32(10, 10, 11, 246), a));
+    // L1 / R1: the categories
+    bool popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
+    if (!popup && !ui_text_busy()) {
+        int step = ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) ? 1 : ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) ? -1 : 0;
+        if (step) {
+            g_ccat = (g_ccat + step + NCCATS) % NCCATS, g_quit_ask = 0;
+            opt_page_replay();
+            opt_focus_first(true);
+        }
+    }
+    float mx = 64 * s + dx, top = 40 * s;
+    // the title, the open category beside it
+    float ts = 44 * s;
+    c_text(dl, c_light(), ts, ImVec2(mx, top), c_fade(IM_COL32(242, 242, 243, 255), a), tr("Settings"));
+    c_text(dl, c_reg(), 20 * s, ImVec2(mx + c_width(c_light(), ts, tr("Settings")) + 20 * s, top + ts * 0.45f),
+           c_fade(IM_COL32(161, 161, 168, 255), a), tr(k_ccats[g_ccat].name));
+    c_text(dl, c_med(), 15 * s, ImVec2(W - 64 * s - c_width(c_med(), 15 * s, "WSWORD"), top + ts * 0.45f),
+           c_fade(IM_COL32(142, 142, 150, 255), a), "WSWORD");
+    // the categories down the left: the open one white, the bar gliding to it
+    float ry = top + 92 * s, rh = 56 * s, rw = 250 * s, cfs = 26 * s;
+    float bar_target = ry + g_ccat * rh;
+    g_cbar = g_cbar < 0 ? bar_target : c_approach(g_cbar, bar_target, 15);
+    static float shift[NCCATS];
+    for (int i = 0; i < NCCATS; i++) {
+        float e = c_ease((float)(now - g_view_at - 0.04 - i * 0.03) / 0.34f) * (1 - closing);
+        bool open_cat = i == g_ccat;
+        ImGui::SetCursorScreenPos(ImVec2(mx, ry + i * rh));
+        ImGui::PushID(100 + i);
+        ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);  // (the controller's cursor stays in the rows: L1 / R1 here)
+        if (ImGui::InvisibleButton("##cat", ImVec2(rw, rh)) && i != g_ccat) { g_ccat = i, g_quit_ask = 0; opt_page_replay(); opt_focus_first(true); }
+        ImGui::PopItemFlag();
+        ImGui::PopID();
+        shift[i] = c_approach(shift[i], open_cat ? 6 * s : 0);
+        ImFont *f = open_cat ? c_med() : c_reg();
+        c_text(dl, f, cfs, ImVec2(mx + 24 * s + shift[i], ry + i * rh + (rh - cfs) * 0.5f - 2 * s + 8 * s * (1 - e)),
+               c_fade(open_cat ? IM_COL32(242, 242, 243, 255) : IM_COL32(124, 124, 132, 255), e), tr(k_ccats[i].name));
+    }
+    dl->AddRectFilled(ImVec2(mx, g_cbar + 10 * s), ImVec2(mx + 2.5f * s, g_cbar + rh - 10 * s), c_fade(IM_COL32(242, 242, 243, 255), a), 1.5f * s);
+    // the page: the open category's rows (the console look), easing in
+    float foot = 84 * s, px = mx + rw + 56 * s, pw = W - 64 * s - px, ph = H - ry - foot - 16 * s;
+    ImGui::SetCursorScreenPos(ImVec2(px, ry - 6 * s));
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, a < 0.02f ? 0.02f : a);
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
+    ImGui::BeginChild("##cpage", ImVec2(pw, ph), ImGuiChildFlags_None, ImGuiWindowFlags_NavFlattened | ImGuiWindowFlags_NoScrollbar);
+    ImGui::PopStyleColor();
+    float rs = ImGui::GetFontSize() / 34;
+    ImGui::PushID(k_ccats[g_ccat].id);
+    switch (k_ccats[g_ccat].id) {
+    case 0: g_colour_own_page = true; tab_display(); break;
+    case 10: opt_begin("##colour", rs); tab_colour(); opt_end(); break;
+    case 1: tab_audio(); break;
+    case 8: console_controls(rs); break;
+    case 2: tab_language(true); break;
+    case 4: mods_tab_draw(rs, true); break;
+    case 9: tab_quit(s, true); break;
+    }
+    ImGui::PopID();
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    // the foot: the selected row's name and description, the prompts
+    float fy = H - foot - 8 * s;
+    dl->AddLine(ImVec2(64 * s, fy), ImVec2(W - 64 * s, fy), c_fade(IM_COL32(30, 30, 33, 255), a), 1.2f * s);
+    const char *hn, *hd;
+    opt_console_help(&hn, &hd);
+    if (g_help_name != hn) g_help_name = hn, g_help_at = now;
+    float he = c_ease((float)(now - g_help_at) / 0.26f) * a;
+    std::string line = hd;
+    size_t cut = line.find("\n\n");
+    if (cut != std::string::npos) line.resize(cut);  // (the first paragraph: the foot has room for two lines)
+    float hfs = 18 * s, room = W - 64 * s - 64 * s - 700 * s;
+    ImGui::PushFont(c_reg());
+    dl->AddText(c_reg(), hfs, ImVec2(64 * s, fy + 14 * s + 4 * s * (1 - he)), c_fade(IM_COL32(161, 161, 168, 255), he), line.c_str(), NULL, room);
+    ImGui::PopFont();
+    static const CPrompt pr[] = {{-2, NULL, "Close"}, {1, NULL, "Back"}, {0, NULL, "Select"}, {-1, "L1 / R1", "Category"}};
+    c_prompts(dl, W - 64 * s, fy + foot * 0.5f, s, pr, 4, a);
+}
+
+// The console menu's frame (menu_render, while the menu is open)
+static void console_menu(ImGuiIO &io, float scale) {
+    double now = ImGui::GetTime();
+    if (!g_was_open) {  // opened: the quick menu rises, the cursor on Resume
+        g_was_open = true, g_cview = CV_QUICK, g_open_at = g_view_at = now, g_close_at = -1;
+        g_cfocus = 4, g_cfocus_on = 0, g_ring = ImVec4(-1, 0, 0, 0), g_cbar = -1, g_quit_ask = 0;
+    }
+    if (g_close_req.exchange(false)) c_close();
+    float closing = g_close_at < 0 ? 0 : (float)(now - g_close_at) / 0.22f;
+    if (closing >= 1) {  // the sheet has sunk away: closed
+        g_close_at = -1, g_was_open = false;
+        set_open(false);
+        return;
+    }
+    // WSword's black and greys for ImGui's own widgets on the pages (lists, the bindings' table)
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.08f, 0.08f, 0.09f, 1));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.17f, 0.17f, 0.19f, 1));
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.17f, 0.17f, 0.19f, 1));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.22f, 0.22f, 0.24f, 1));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.26f, 0.26f, 0.28f, 1));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.11f, 0.11f, 0.12f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.17f, 0.17f, 0.19f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.22f, 0.22f, 0.24f, 1));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.11f, 0.11f, 0.12f, 1));
+    ImGui::PushStyleColor(ImGuiCol_TableHeaderBg, ImVec4(0.08f, 0.08f, 0.09f, 1));
+    ImGui::PushStyleColor(ImGuiCol_TableBorderStrong, ImVec4(0.17f, 0.17f, 0.19f, 1));
+    ImGui::PushStyleColor(ImGuiCol_TableBorderLight, ImVec4(0.12f, 0.12f, 0.13f, 1));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.95f, 0.953f, 1));
+    ImGui::PushStyleColor(ImGuiCol_TextDisabled, ImVec4(0.63f, 0.63f, 0.66f, 1));
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0.95f, 0.95f, 0.953f, 1));
+    ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::Begin("##menu", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                 ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleVar();
+    ImFont *keep_big = g_font_big;
+    g_font_big = c_light();
+    ImGui::PushFont(c_reg());
+    opt_console_look(true, c_reg(), c_med());
+    bool any_popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId), typing = ui_text_busy();
+    int view = g_cview, asking = g_quit_ask;  // (before the page: Quit's Circle cancels its question this frame)
+    if (view == CV_QUICK) c_quick(io, scale, closing);
+    else c_settings(io, scale, closing);
+    // Circle: the settings back to the quick menu (not while the Quit page asks, nor a list or the keyboard is open),
+    // the quick menu closes
+    if (g_close_at < 0 && view == g_cview && !any_popup && !typing && !ui_text_busy() &&
+        (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false))) {
+        if (view == CV_QUICK) c_close();
+        else if (!asking) c_back_to_quick();
+    }
+    opt_console_look(false, NULL, NULL);
+    ImGui::PopFont();
+    g_font_big = keep_big;
+    ImGui::End();
+    ImGui::PopStyleColor(15);
+    osk_draw(g_font_big, scale);  // (a text field activated with the controller)
 }
 #endif
 
@@ -2271,7 +2719,13 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
     if (notice_on()) notice_draw(io, scale);
     if (!open && !kbd && !sizes && !con && gyro_scene_show) gyro_scene_draw(io, scale, gyro_scene);
 
+#ifdef __PROSPERO__
+    if (open) console_menu(io, scale);  // (WSword PS5: the console menu, quick menu first)
+    else g_was_open = false, g_close_req.store(false);
+    if (false) {
+#else
     if (open) {
+#endif
         // dim the game behind the menu
 #ifdef __PROSPERO__
         ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(4, 10, 20, 170));
