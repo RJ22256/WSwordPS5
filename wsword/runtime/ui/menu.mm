@@ -1538,6 +1538,50 @@ static void perf_overlay_draw(ImGuiIO &io, float scale) {
     PerfStats s;
     perfmon_snapshot(&s);
     // top right: BOTW keeps its hearts and stamina top left, its map and gauges bottom right
+#ifdef __PROSPERO__
+    // (WSword PS5) the console menu's look: a black card, a thin grey edge, SST, grey labels and white values, fading in
+    static int seen_frame = -10, seen_mode = -1;
+    static double shown_at;
+    int frame = ImGui::GetFrameCount();
+    if (frame - seen_frame > 1 || seen_mode != g_settings.perf_overlay) shown_at = ImGui::GetTime();
+    seen_frame = frame, seen_mode = g_settings.perf_overlay;
+    float fe = fminf(1.0f, (float)(ImGui::GetTime() - shown_at) / 0.25f);
+    fe = 1 - (1 - fe) * (1 - fe) * (1 - fe);
+    float m = 28 * scale;
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - m, m - 6 * scale * (1 - fe)), 0, ImVec2(1, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, fe);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 14 * scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f * scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18 * scale, 12 * scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(8 * scale, 2 * scale));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(10 / 255.f, 10 / 255.f, 11 / 255.f, 0.90f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(46 / 255.f, 46 / 255.f, 52 / 255.f, 1));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(242 / 255.f, 242 / 255.f, 243 / 255.f, 1));
+    ImGui::PushStyleColor(ImGuiCol_TextDisabled, ImVec4(124 / 255.f, 124 / 255.f, 132 / 255.f, 1));
+    ImGui::PushStyleColor(ImGuiCol_PlotLines, ImVec4(242 / 255.f, 242 / 255.f, 243 / 255.f, 1));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(28 / 255.f, 28 / 255.f, 31 / 255.f, 1));
+    ImFont *perf_font = g_sst ? g_sst : ImGui::GetFont();
+    ImGui::PushFont(perf_font);  // (outside the window: End() checks the font stack it began with)
+    struct PerfStyleEnd {
+        ~PerfStyleEnd() { ImGui::PopFont(), ImGui::PopStyleColor(6), ImGui::PopStyleVar(5); }
+    } perf_style_end;  // (popped after End(), on every return)
+    ImGui::Begin("##perf", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
+    if (g_settings.perf_overlay == PERF_FPS) {
+        ImGui::PushFont(g_sst_med ? g_sst_med : ImGui::GetFont());
+        ImGui::SetWindowFontScale(1.05f);
+        ImGui::Text("%.0f", s.fps + s.fps_generated);
+        ImGui::PopFont();
+        ImGui::SameLine(0, 8 * scale);
+        ImGui::SetWindowFontScale(0.66f);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5 * scale);
+        ImGui::TextDisabled("FPS   %.1f ms", s.frame_ms_avg);
+        ImGui::End();
+        return;
+    }
+    ImGui::SetWindowFontScale(0.78f);
+    const ImVec4 lab(142 / 255.f, 142 / 255.f, 150 / 255.f, 1), gpu_c = lab, cpu_c = lab, ram_c = lab, fps_c = lab;
+#else
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 16 * scale, 16 * scale), 0, ImVec2(1, 0));
     ImGui::SetNextWindowBgAlpha(0.6f);
     ImGui::Begin("##perf", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
@@ -1551,6 +1595,7 @@ static void perf_overlay_draw(ImGuiIO &io, float scale) {
         ImGui::End();
         return;
     }
+#endif
     if (ImGui::BeginTable("##perft", 4, ImGuiTableFlags_SizingFixedFit)) {
         ImGui::TableNextColumn(); ImGui::TextColored(gpu_c, "GPU");
         perf_cell("%.0f%%", s.gpu_pct); perf_cell("%.0f C", s.gpu_temp_c); perf_cell("%.0f W", s.gpu_power_w);

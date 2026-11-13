@@ -219,14 +219,18 @@ static int row(const char *label, const std::string &value, bool changed, const 
         g_is_toggle = false;
         ImGuiStorage *st = ImGui::GetStateStorage();
         float e = entrance(g_row_index++), dy = 10 * s * (1 - e);
-        float *fsel = st->GetFloatRef(id + 1, 0), *fknob = st->GetFloatRef(id + 2, on ? 1.0f : 0.0f);
-        float *fbar = st->GetFloatRef(id + 3, bar < 0 ? 0 : bar), *vchange = st->GetFloatRef(id + 5, -10);
-        int *vhash = st->GetIntRef(id + 4, (int)ImHashStr(value.c_str()));
-        *fsel = approach(*fsel, sel ? 1.0f : 0.0f);
-        *fknob = approach(*fknob, on ? 1.0f : 0.0f);
-        if (bar >= 0) *fbar = approach(*fbar, g_drag_id == id ? g_drag : bar);
+        // (by value, never GetFloatRef: a new key can grow the storage and leave an earlier pointer into freed memory,
+        // which corrupted the heap when a category's rows first appeared)
         int hsh = (int)ImHashStr(value.c_str());
-        if (hsh != *vhash) *vhash = hsh, *vchange = (float)ImGui::GetTime();
+        float sel_v = approach(st->GetFloat(id + 1, 0), sel ? 1.0f : 0.0f);
+        float knob_v = approach(st->GetFloat(id + 2, on ? 1.0f : 0.0f), on ? 1.0f : 0.0f);
+        float bar_v = st->GetFloat(id + 3, bar < 0 ? 0 : bar);
+        if (bar >= 0) bar_v = approach(bar_v, g_drag_id == id ? g_drag : bar);
+        float change_v = st->GetFloat(id + 5, -10);
+        if (st->GetInt(id + 4, hsh) != hsh) change_v = (float)ImGui::GetTime();
+        st->SetFloat(id + 1, sel_v), st->SetFloat(id + 2, knob_v), st->SetFloat(id + 3, bar_v);
+        st->SetFloat(id + 5, change_v), st->SetInt(id + 4, hsh);
+        float *fsel = &sel_v, *fknob = &knob_v, *fbar = &bar_v, *vchange = &change_v;
         float a = e * (off ? 0.45f : 1.0f);
         ImVec2 r0(p.x + 2 * s, p.y + 2 * s + dy), r1(p.x + w - 2 * s, p.y + h - 2 * s + dy);
         if (*fsel > 0.01f) {  // the highlight: a lighter grey with a thin light edge, fading in and out
