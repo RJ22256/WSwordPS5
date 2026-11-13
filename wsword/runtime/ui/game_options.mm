@@ -734,11 +734,12 @@ bool install(void) {
         g_entries.push_back(e);
     }
     for (auto &o : g_order) o.clear();
-    // the game's rows: camera and motion aiming ones on Controls; amiibo, the voice language (Language has the voices)
-    // and the VR goggles mode (no use on a PC screen) left out; the rest on Gameplay
+    // the game's rows: camera and motion aiming ones on Controls; the voice language (Language has the voices) and the
+    // VR goggles mode (no use on a PC screen) left out; the rest - amiibo too (WSword's virtual amiibo, runtime/amiibo.h:
+    // the game's switch for the amiibo rune) - on Gameplay
     for (uint32_t r = 0; r < rows; r++) {
         uint32_t e = ((const uint32_t *)(uintptr_t)order)[r];
-        if (e == GAME_AMIIBO || e == GAME_VOICE_BUTTON || e == GAME_VOICE_LEVEL || e == GAME_VR) continue;
+        if (e == GAME_VOICE_BUTTON || e == GAME_VOICE_LEVEL || e == GAME_VR) continue;
         bool camera = e == GAME_CAMERA_Y || e == GAME_CAMERA_X || e == GAME_GYRO || e == GAME_CAMERA_SENSITIVITY;
         g_order[camera ? P_CONTROLS : P_GAMEPLAY].push_back(e);
     }
@@ -1153,7 +1154,8 @@ extern "C" uint64_t rt_opt_screen(void) { return options_screen(); }
 // (lower). Its buttons write their answer to dialog_answer (1.8.2 0x7001c4b308; upper 0x5b: 0, lower 0x5a: 1;
 // FUN_7100d46598) and leave the dialog up; B closes it without an answer (rt_quit_dialog_back).
 
-// The title menu's amiibo settings button (WSword has no amiibo support) is Quit
+// The title menu's amiibo settings button (the console's amiibo settings: none here - WSword's amiibo are the amiibo
+// bar's, runtime/amiibo.h) is Quit
 extern "C" int rt_title_event(uint32_t id) { return id == TITLE_AMIIBO_BUTTON; }
 
 // LayoutMsg/Title_00 lookups: "0003" (the amiibo settings button) reads Quit

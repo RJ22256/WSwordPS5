@@ -39,5 +39,6 @@ The title starts from [mihawk-99's PS5 Vulkan Template](https://github.com/mihaw
 - Sascha Willems: the Vulkan examples' base (MIT).
 - Mesa / RADV (MIT), the payload SDK's platform layer (GPL-3.0-or-later): the title links them, so the title as built is GPL-3.0-or-later. The foundation's own files keep their MIT notices (`LICENSE.md`).
 - WSword is built on [Savage Wind Recomp](https://github.com/Revivedx/SavageWindRecomp) (MIT).
+- The amiibo bar's list of figures (their public ids and names) comes from [AmiiboAPI](https://github.com/N3evin/AmiiboAPI) (MIT); no figure's data or keys.
 
 WSword PS5 is not affiliated with Sony, Nintendo, NVIDIA or the projects above.

@@ -448,6 +448,10 @@ static ImFont *g_font, *g_font_big;
 static ImFont *g_font_mono;  // the console (columns line up); NULL: the normal font
 static ImFont *g_menu_font, *g_menu_font_big;  // the menu window (Fira Sans); everything else keeps g_font
 static ImFont *g_sst, *g_sst_med, *g_sst_light;  // (WSword PS5) the console menu's SST, where it's found (NULL: the menu font)
+// (WSword) the amiibo bar (ui/amiibo_bar.mm): up while the game looks for a figure
+bool amiibo_bar_visible(void);
+void amiibo_bar_draw(ImGuiIO &io, float scale, ImFont *font);
+void amiibo_settings_rows(void);
 static int g_tab = -99, g_tab_request = -2;  // (-2: no request; -1 is the start screen's Files; g_tab -99: none yet - the first)
 static int g_focus_tab = -99;  // put the nav cursor on this tab next frame (-100: the selected one; -99: none)
 static int g_focus_frames;
@@ -1460,6 +1464,8 @@ static void tab_about(void) {
     header("Controls");
     controls_bindings_draw(ImGui::GetFontSize() / 34);
     ImGui::Spacing();
+    amiibo_settings_rows();   // (WSword: the amiibo bar's, ui/amiibo_bar.mm)
+    ImGui::Spacing();
     header("Menu");
 #ifdef __PROSPERO__
     ImGui::TextUnformatted(tr("Open / close this menu:  tap the touch pad with two fingers"));
@@ -2330,6 +2336,7 @@ static void console_controls(float rs) {  // the Controls category: the d-pad, t
                "The d-pad (and the arrow keys) also move like the left stick while the stick is at rest.");
     opt_section("Buttons");
     controls_bindings_draw(ImGui::GetFontSize() / 34);
+    amiibo_settings_rows();   // (WSword: the amiibo bar's, ui/amiibo_bar.mm)
     opt_section("Menu");
     opt_action("Open or close this menu", tr("Two-finger tap"), "Rest two fingers on the touch pad, without clicking it, and lift "
                "them. The game never reads the touch pad's touches, so nothing in it answers.", false);
@@ -2675,7 +2682,7 @@ static bool menu_draws(bool *pointer_hover = NULL, float *pointer_box = NULL, bo
     if (pointer_hover) *pointer_hover = hover;
     if (gyro_show) *gyro_show = gyro_on;
     return g_open.load() || g_kbd.load() == 1 || g_sizes.load() || console_is_open() || gyro_on || hover ||
-           g_settings.perf_overlay != PERF_OFF || notice_on();
+           g_settings.perf_overlay != PERF_OFF || notice_on() || amiibo_bar_visible();
 }
 
 bool menu_render_needed(void) { return menu_draws(); }
@@ -2762,6 +2769,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
 
     if (g_settings.perf_overlay != PERF_OFF) perf_overlay_draw(io, scale);
     if (notice_on()) notice_draw(io, scale);
+    if (!open && amiibo_bar_visible()) amiibo_bar_draw(io, scale, g_sst ? g_sst : g_menu_font);
     if (!open && !kbd && !sizes && !con && gyro_scene_show) gyro_scene_draw(io, scale, gyro_scene);
 
 #ifdef __PROSPERO__

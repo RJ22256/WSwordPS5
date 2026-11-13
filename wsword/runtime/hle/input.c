@@ -23,6 +23,7 @@
 #include "../vibration.h"
 #include "../framepace.h"
 #include "../pc_cursor.h"
+#include "../amiibo.h"
 
 enum {
     BTN_A = 0, BTN_B, BTN_X, BTN_Y, BTN_LSTICK, BTN_RSTICK, BTN_L, BTN_R, BTN_ZL, BTN_ZR, BTN_PLUS, BTN_MINUS,
@@ -836,6 +837,14 @@ static void fill_state(Cpu *c) {
     int32_t mx = 0, my = 0;
     if (!menu) mouse_stick(&mx, &my);
     int32_t rx = clamp_axis((menu ? 0 : key_rx + prx + mx) + script_rx), ry = clamp_axis((menu ? 0 : key_ry + pry + my) + script_ry);
+    // (WSword) the amiibo bar (runtime/amiibo.h): while it is up it has A, X, the d-pad and the right stick - the
+    // controller's and keys' stick, not the mouse's turning (B still goes to the game: it leaves the amiibo rune)
+    {
+        int32_t bar_rx = menu ? 0 : clamp_axis(key_rx + prx), bar_ry = 0;
+        uint64_t mine = menu ? 0 : b;
+        amiibo_bar_filter(&mine, &bar_rx, &bar_ry);   // (not up: it forgets what was held)
+        if (!menu && amiibo_bar_up()) b = mine, rx = 0, ry = 0;
+    }
     // d-pad / arrow keys walk (setting) while the stick is at rest. "At rest" has a dead zone: a controller's stick
     // never reads exactly 0 (a DualSense rests at a few hundred), which used to turn the d-pad off altogether.
     if (!menu && g_settings.dpad_move && (int64_t)lx * lx + (int64_t)ly * ly < 8000ll * 8000) {
