@@ -1159,6 +1159,13 @@ bool SDL_PutAudioStreamData(SDL_AudioStream *st, const void *data, int len) {
     pthread_mutex_unlock(&g_audio_lock);
     return true;
 }
+bool SDL_ClearAudioStream(SDL_AudioStream *st) {  // (WSword's amiibo bar: a new tick cuts the last short)
+    if (!st) return false;
+    pthread_mutex_lock(&g_audio_lock);
+    st->head = 0, st->len = 0;
+    pthread_mutex_unlock(&g_audio_lock);
+    return true;
+}
 int SDL_GetAudioStreamQueued(SDL_AudioStream *st) {
     if (!st) return -1;
     pthread_mutex_lock(&g_audio_lock);
