@@ -309,6 +309,9 @@ void button_mark(ImDrawList *dl, ImFont *f, ImVec2 c, float r, int which, ImU32 
 }
 }  // namespace
 
+ImTextureID amiibo_pic(uint64_t id, float *w, float *h);   // ui/amiibo_pics.mm
+void amiibo_pics_rows(void);
+
 extern "C" bool amiibo_bar_up(void) { return amiibo_waiting() && !menu_is_open(); }
 
 bool amiibo_bar_visible(void) { return amiibo_bar_up() || g_was_up || ImGui::GetCurrentContext() && ImGui::GetTime() - g_close_at < 0.24; }
@@ -469,9 +472,18 @@ void amiibo_bar_draw(ImGuiIO &io, float scale, ImFont *font) {
         dl->AddRectFilled(p0, p1, fade(IM_COL32(34, 26, 18, sel ? 168 : 138), sa));
         dl->AddRect(p0, p1, fade(IM_COL32(18, 14, 10, 150), sa), 0, 0, 1.6f * s);
         dl->AddRect(ImVec2(p0.x + 1.6f * s, p0.y + 1.6f * s), ImVec2(p1.x - 1.6f * s, p1.y - 1.6f * s), fade(IM_COL32(255, 240, 220, 22), sa), 0, 0, 1.0f * s);
-        figure_icon(dl, ImVec2(x, sy - 6 * s), slot, group_colour(fig->group), is_card(fig->id), sa, u);
-        std::string ini = initials(fig->name);
-        count_badge(dl, f, p1, s, ini.c_str(), sa, u);
+        float pw = 0, ph = 0;
+        ImTextureID pic = amiibo_pic(fig->id, &pw, &ph);   // (ui/amiibo_pics.mm: the figure's own picture, if downloaded)
+        if (pic && pw > 0 && ph > 0) {   // fitted in the slot, as the game's item icons
+            float room = slot - 14 * s, k = fminf(room / pw, room / ph), iw = pw * k, ih = ph * k;
+            ImVec2 i0(x - iw * 0.5f, sy - ih * 0.5f), i1(x + iw * 0.5f, sy + ih * 0.5f);
+            int lum = u ? 150 : 255;
+            dl->AddImage(pic, i0, i1, ImVec2(0, 0), ImVec2(1, 1), fade(IM_COL32(lum, lum, lum, 255), sa));
+        } else {
+            figure_icon(dl, ImVec2(x, sy - 6 * s), slot, group_colour(fig->group), is_card(fig->id), sa, u);
+            std::string ini = initials(fig->name);
+            count_badge(dl, f, p1, s, ini.c_str(), sa, u);
+        }
         if (fav) {   // (the game's small mark at a slot's top left: here a favourite's star)
             star(dl, ImVec2(p0.x + 15 * s, p0.y + 15 * s), 10 * s, fade(IM_COL32(60, 44, 0, 200), sa));
             star(dl, ImVec2(p0.x + 14 * s, p0.y + 14 * s), 9 * s, fade(IM_COL32(250, 214, 64, 255), sa));
@@ -593,6 +605,7 @@ void amiibo_settings_rows(void) {
     if (opt_action("Clear favourites", v, "Your favourites come first in the amiibo bar. Add or take one out there with "
                    "X (Square on the PS5). This empties the list.", false) && nf)
         amiibo_clear_favourites();
+    amiibo_pics_rows();   // (ui/amiibo_pics.mm: Pictures - download, delete)
     opt_action("Open the amiibo bar", "amiibo rune", "Choose the amiibo rune and use it, as with a figure: the bar of "
                "every amiibo comes up. Pick one with the right stick and tap it with A (Cross on the PS5)"
 #ifdef __ANDROID__
