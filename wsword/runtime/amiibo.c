@@ -185,11 +185,15 @@ static void ev_set(KEvent *e, bool on) {
     else e->signaled = false;
     pthread_mutex_unlock(&g_klock);
 }
+// An Attach*Event: a new handle to the event each time, as the console's kernel copies one - the game closes the one
+// it had (nn::nfp::Finalize, after each use of the amiibo rune), so handing the same number back again gave it a closed
+// handle to wait on, and a tapped figure was never seen (0.3.26-0.3.27, slate.19)
 static uint32_t ev_handle(KEvent **e, uint32_t *h) {
     if (!*e) {
-        uint32_t w;
-        *e = kernel_create_event_pair(&w, h);
+        uint32_t w, r;
+        *e = kernel_create_event_pair(&w, &r);
     }
+    *h = kernel_new_handle(*e);
     return *h;
 }
 
@@ -438,7 +442,7 @@ static void nfp_user(Service *s, IpcReq *req, IpcResp *resp) {
     default: LOG("[amiibo] nfp IUser cmd %u (ok)\n", req->cmd); resp_size(resp, 0x10);
     }
     static int nlog;
-    if (nlog < 200 && getenv("WSWORD_AMIIBO_LOG"))
+    if (nlog < 160)   // (the log has the game's calls: what a report needs)
         nlog++, LOG("[amiibo] cmd %u -> %#x (state %d)\n", req->cmd, resp->result, g_state);
     pthread_mutex_unlock(&g_mu);
 }
