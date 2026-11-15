@@ -44,6 +44,7 @@ uint64_t amiibo_bar_input_held(void);
 uint64_t amiibo_bar_input_pressed(void);   // pressed since the last call (presses shorter than a frame kept)
 int32_t amiibo_bar_input_rx(void);
 bool amiibo_bar_up(void);   // ui/amiibo_bar.mm: the bar is drawn (amiibo_waiting, and WSword's menu closed)
+uint64_t amiibo_bar_injected(void);   // ui/amiibo_bar.mm: buttons the bar presses for the game (Android: Cancel's B)
 
 #ifdef __cplusplus
 }

@@ -11,6 +11,11 @@
 //
 // A figure tapped today (with the game's once-a-day rule on) shows amber brackets and a clock; it can still be
 // tapped - the game itself says no.
+//
+// Android (the tablet): the bar by touch too - drag the row to scroll it, touch a figure to choose it and touch the
+// chosen one again to tap it; the prompts are buttons (Series: its top half the previous, its bottom half the next;
+// Cancel presses the game's B). ui/touch_controls.mm hands the bar the fingers that land on it
+// (amiibo_bar_touch_event); the bar's prompts sit under the row, clear of the on-screen controls.
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
@@ -19,6 +24,11 @@
 #include <vector>
 
 #include "imgui.h"
+#ifdef __ANDROID__
+#include <SDL3/SDL.h>
+#include <atomic>
+#include <mutex>
+#endif
 
 #include "../amiibo.h"
 #include "menu.h"
@@ -36,6 +46,24 @@ int g_rep_dir;              // the stick held to one side: its direction, and wh
 double g_rep_next;
 double g_fav_flash_at = -10;
 bool g_fav_flash_on;
+
+#ifdef __ANDROID__
+// touch: the event thread queues the fingers that land on the bar; the render thread (amiibo_bar_draw) plays them
+struct TouchEv { int kind; float x, y; };   // 0 down, 1 move, 2 up, 3 cancelled
+std::mutex g_tmu;
+std::vector<TouchEv> g_tq;
+bool g_tdown;
+SDL_FingerID g_tfinger;
+ImVec2 g_lay0, g_lay1;                      // the bar's area as last drawn (g_tmu); g_lay_on: drawn
+bool g_lay_on;
+// the render thread's own: the finger's start, the row's position then, whether it has moved (a drag)
+ImVec2 g_t0;
+float g_tbase;
+bool g_tmoved;
+ImVec4 g_prompt_rect[4];                    // the prompts as last drawn (x0, y0, x1, y1)
+std::atomic<double> g_inject_b_until{0};    // Cancel: the game's B held until then (ImGui's clock)
+std::atomic<double> g_now{0};
+#endif
 
 void build_order(uint64_t keep) {
     g_order.clear();
@@ -146,6 +174,43 @@ void amiibo_bar_draw(ImGuiIO &io, float scale, ImFont *font) {
     // the controls
     uint64_t held = amiibo_bar_input_held(), pressed = amiibo_bar_input_pressed();
     enum { A = 1 << 0, X = 1 << 2, LEFT = 1 << 12, UP = 1 << 13, RIGHT = 1 << 14, DOWN = 1 << 15 };
+    float s = scale, W = io.DisplaySize.x, H = io.DisplaySize.y;
+    float slot = 96 * s, gap = 12 * s, cy = H * 0.40f, cx = W * 0.5f;
+#ifdef __ANDROID__
+    g_now = now;
+    {   // the fingers on the bar: a drag scrolls the row; a touch chooses a figure, the chosen one taps it
+        std::vector<TouchEv> q;
+        { std::lock_guard<std::mutex> l(g_tmu); q.swap(g_tq); }
+        for (const TouchEv &t : q) {
+            if (t.kind == 0) { g_t0 = ImVec2(t.x, t.y), g_tbase = g_scroll, g_tmoved = false; continue; }
+            float dx = t.x - g_t0.x;
+            if (t.kind == 1) {
+                if (!g_tmoved && fabsf(dx) > 14 * s && fabsf(g_t0.y - cy) <= slot) g_tmoved = true;
+                if (g_tmoved) {
+                    g_scroll = g_tbase - dx / (slot + gap);
+                    g_sel = (((int)floorf(g_scroll + 0.5f)) % n + n) % n;
+                }
+                continue;
+            }
+            if (t.kind == 3 || g_tmoved) { g_tmoved = false; continue; }
+            // a touch: on the row, a figure; on a prompt, its button
+            if (fabsf(t.y - cy) <= slot * 0.5f + 10 * s) {
+                int pos = (((int)floorf(g_scroll + (t.x - cx) / (slot + gap) + 0.5f)) % n + n) % n;
+                if (pos == g_sel) pressed |= A;
+                else g_sel = pos;
+                continue;
+            }
+            for (int i = 0; i < 4; i++) {
+                const ImVec4 &r = g_prompt_rect[i];
+                if (t.x < r.x || t.x > r.z || t.y < r.y || t.y > r.w) continue;
+                if (i == 0) pressed |= t.y < (r.y + r.w) * 0.5f ? UP : DOWN;
+                else if (i == 1) pressed |= A;
+                else if (i == 2) pressed |= X;
+                else g_inject_b_until = now + 0.15;   // (the game's own cancel: it leaves the amiibo rune)
+            }
+        }
+    }
+#endif
     int step = 0;
     if (pressed & LEFT) step = -1;
     if (pressed & RIGHT) step = 1;
@@ -187,8 +252,6 @@ void amiibo_bar_draw(ImGuiIO &io, float scale, ImFont *font) {
     g_scroll += ((float)g_sel - g_scroll) * k;
     if (fabsf(g_scroll - g_sel) < 0.001f) g_scroll = (float)g_sel;
     float a = ease((float)(now - g_open_at) / 0.18f);
-    float s = scale, W = io.DisplaySize.x, H = io.DisplaySize.y;
-    float slot = 96 * s, gap = 12 * s, cy = H * 0.40f, cx = W * 0.5f;
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     ImFont *f = font ? font : ImGui::GetFont();
     bool used = amiibo_used_today(cur->id);
@@ -242,7 +305,13 @@ void amiibo_bar_draw(ImGuiIO &io, float scale, ImFont *font) {
     while (gfirst > 0 && group_of(gfirst - 1) == group_of(g_sel)) gfirst--;
     while (glast < n - 1 && group_of(glast + 1) == group_of(g_sel)) glast++;
     snprintf(line, sizeof line, "%s  \xc2\xb7  %d of %d  \xc2\xb7  %s", grp, g_sel - gfirst + 1, glast - gfirst + 1,
-             used ? "tapped today: the game takes each figure once a day" : "ready");
+             used ? "tapped today: the game takes each figure once a day" :
+#ifdef __ANDROID__
+             "ready \xc2\xb7 touch it again to tap it"
+#else
+             "ready"
+#endif
+             );
     if (now - g_fav_flash_at < 1.6)
         snprintf(line, sizeof line, "%s", g_fav_flash_on ? "Added to your favourites: first in the bar" : "Taken out of your favourites");
     float lfs = 19 * s;
@@ -252,7 +321,11 @@ void amiibo_bar_draw(ImGuiIO &io, float scale, ImFont *font) {
     dl->AddText(f, lfs, ImVec2(cx - ls.x * 0.5f, ly), fade(used && now - g_fav_flash_at >= 1.6 ? IM_COL32(246, 207, 138, 255) : white, a), line);
     // the prompts: a strip along the bottom
     struct P { int mark; const char *label; } pr[] = {{-1, "Series"}, {0, "Tap"}, {2, amiibo_favourite(cur->id) ? "Unfavourite" : "Favourite"}, {1, "Cancel"}};
+#ifdef __ANDROID__
+    float pfs = 19 * s, py = hy + hr + 12 * s + lfs + 46 * s, total = 0, pr_r = 13 * s;   // (under the row: clear of the
+#else                                                                                        //  on-screen controls)
     float pfs = 19 * s, py = H - 64 * s, total = 0, pr_r = 13 * s;
+#endif
     float widths[4];
     for (int i = 0; i < 4; i++) widths[i] = 2 * pr_r + 10 * s + f->CalcTextSizeA(pfs, FLT_MAX, 0, pr[i].label).x, total += widths[i];
     total += 34 * s * 3;
@@ -266,8 +339,54 @@ void amiibo_bar_draw(ImGuiIO &io, float scale, ImFont *font) {
             dl->AddTriangleFilled(ImVec2(c.x, c.y + pr_r), ImVec2(c.x - t, c.y + pr_r - t * 1.2f), ImVec2(c.x + t, c.y + pr_r - t * 1.2f), fade(white, a));
         } else button_mark(dl, f, c, pr_r, pr[i].mark, fade(white, a));
         dl->AddText(f, pfs, ImVec2(x + 2 * pr_r + 10 * s, py - pfs * 0.55f), fade(IM_COL32(220, 220, 224, 255), a), pr[i].label);
+#ifdef __ANDROID__
+        g_prompt_rect[i] = ImVec4(x - 17 * s, py - 30 * s, x + widths[i] + 17 * s, py + 30 * s);
+#endif
         x += widths[i] + 34 * s;
     }
+#ifdef __ANDROID__
+    {   // the bar's area, for the fingers: the name to the prompts, the row's width
+        std::lock_guard<std::mutex> l(g_tmu);
+        float hw = fmaxf((side + 1) * (slot + gap), total * 0.5f + 26 * s);
+        g_lay0 = ImVec2(cx - hw, ny - 12 * s), g_lay1 = ImVec2(cx + hw, py + 30 * s), g_lay_on = true;
+    }
+#endif
+}
+
+#ifdef __ANDROID__
+// ui/touch_controls.mm: a finger on the bar is the bar's (true: taken - the on-screen controls don't see it). w, h: the
+// screen in pixels (the fingers' 0..1 times these)
+extern "C" bool amiibo_bar_touch_event(const SDL_Event *e, float w, float h) {
+    std::lock_guard<std::mutex> l(g_tmu);
+    if (!amiibo_bar_up()) { g_tdown = false, g_lay_on = false; return false; }
+    float x = e->tfinger.x * w, y = e->tfinger.y * h;
+    switch (e->type) {
+    case SDL_EVENT_FINGER_DOWN:
+        if (g_tdown || !g_lay_on || x < g_lay0.x || x > g_lay1.x || y < g_lay0.y || y > g_lay1.y) return false;
+        g_tdown = true, g_tfinger = e->tfinger.fingerID;
+        g_tq.push_back({0, x, y});
+        return true;
+    case SDL_EVENT_FINGER_MOTION:
+        if (!g_tdown || e->tfinger.fingerID != g_tfinger) return false;
+        g_tq.push_back({1, x, y});
+        return true;
+    case SDL_EVENT_FINGER_UP: case SDL_EVENT_FINGER_CANCELED:
+        if (!g_tdown || e->tfinger.fingerID != g_tfinger) return false;
+        g_tdown = false;
+        g_tq.push_back({e->type == SDL_EVENT_FINGER_UP ? 2 : 3, x, y});
+        return true;
+    }
+    return false;
+}
+#endif
+
+// hle/input.c: the buttons the bar presses for the game (the touch Cancel: B)
+extern "C" uint64_t amiibo_bar_injected(void) {
+#ifdef __ANDROID__
+    return g_now.load() < g_inject_b_until.load() ? 1u << 1 : 0;
+#else
+    return 0;
+#endif
 }
 
 // The amiibo rows of WSword's settings (Controls)
@@ -286,5 +405,9 @@ void amiibo_settings_rows(void) {
                    "X (Square on the PS5). This empties the list.", false) && nf)
         amiibo_clear_favourites();
     opt_action("Open the amiibo bar", "amiibo rune", "Choose the amiibo rune and use it, as with a figure: the bar of "
-               "every amiibo comes up. Pick one with the right stick and tap it with A (Cross on the PS5).", false);
+               "every amiibo comes up. Pick one with the right stick and tap it with A (Cross on the PS5)"
+#ifdef __ANDROID__
+               ", or touch a figure and touch it again"
+#endif
+               ".", false);
 }
