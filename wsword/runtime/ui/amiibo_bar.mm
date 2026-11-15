@@ -311,7 +311,6 @@ void button_mark(ImDrawList *dl, ImFont *f, ImVec2 c, float r, int which, ImU32 
 
 ImTextureID amiibo_pic(uint64_t id, float *w, float *h);   // ui/amiibo_pics.mm
 void amiibo_pics_rows(void);
-void ability_settings_rows(void);   // ui/ability_fx.mm (WSword's abilities: Slow Time)
 
 extern "C" bool amiibo_bar_up(void) { return amiibo_waiting() && !menu_is_open(); }
 
@@ -613,5 +612,4 @@ void amiibo_settings_rows(void) {
                ", or touch a figure and touch it again"
 #endif
                ".", false);
-    ability_settings_rows();
 }
