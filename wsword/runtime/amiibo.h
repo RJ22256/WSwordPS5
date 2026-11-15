@@ -5,8 +5,9 @@
 // AmiiboAPI's list, amiibo_list.inc), a serial number of its own, and the game's saved data for it (its
 // "application area", e.g. Wolf Link's hearts) in amiibo/<id>.bin. No figure's dump, no keys.
 //
-// The game's once-a-day rule goes by the figure's serial number: with "One scan a day per figure" on (the default)
-// each amiibo always has the same one, so the game counts it; off, every tap gives a new one.
+// The game's once-a-day rule goes by the figure's serial number: off (the default), every tap gives a new one, so
+// there's no limit; with "One scan a day per figure" on each amiibo always has the same one, so the game counts it.
+// (amiibo.ini's once_a_day; 0.3.26's "daily" line is ignored, so the limit is off for everyone after it.)
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>

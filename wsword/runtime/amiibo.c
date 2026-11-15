@@ -47,7 +47,7 @@ const char *amiibo_group_name(int g) {
 
 // ------------------------------------------------------------------ the player's choices (amiibo/amiibo.ini)
 enum { MAX_FAV = 64, MAX_USED = 256 };
-static bool g_loaded, g_daily = true;
+static bool g_loaded, g_daily = false;  // (off: no limit - every tap a new figure to the game)
 static uint64_t g_fav[MAX_FAV];
 static int g_nfav;
 static struct { uint64_t id; int date; } g_used[MAX_USED];   // (date: yyyymmdd, the day it was last tapped)
@@ -77,7 +77,7 @@ static void save_locked(void) {
     FILE *f = fopen("amiibo/amiibo.ini", "w");
     if (!f) { LOG("[amiibo] cannot write amiibo/amiibo.ini: %s\n", strerror(errno)); return; }
     fprintf(f, "# WSword's amiibo: the bar's favourites, the once-a-day rule, the day each figure was last tapped\n");
-    fprintf(f, "daily = %d\nlast = %016llx\n", g_daily, (unsigned long long)g_last);
+    fprintf(f, "once_a_day = %d\nlast = %016llx\n", g_daily, (unsigned long long)g_last);
     for (int i = 0; i < g_nfav; i++) fprintf(f, "favourite = %016llx\n", (unsigned long long)g_fav[i]);
     for (int i = 0; i < g_nused; i++) fprintf(f, "used = %016llx %d\n", (unsigned long long)g_used[i].id, g_used[i].date);
     fclose(f);
@@ -92,7 +92,7 @@ static void load_locked(void) {
     while (fgets(line, sizeof line, f)) {
         unsigned long long id;
         int v;
-        if (sscanf(line, " daily = %d", &v) == 1) g_daily = v != 0;
+        if (sscanf(line, " once_a_day = %d", &v) == 1) g_daily = v != 0;
         else if (sscanf(line, " last = %llx", &id) == 1) g_last = id;
         else if (sscanf(line, " favourite = %llx", &id) == 1 && g_nfav < MAX_FAV && amiibo_index(id) >= 0) g_fav[g_nfav++] = id;
         else if (sscanf(line, " used = %llx %d", &id, &v) == 2 && g_nused < MAX_USED) g_used[g_nused].id = id, g_used[g_nused++].date = v;

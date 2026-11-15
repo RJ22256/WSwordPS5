@@ -274,9 +274,9 @@ void amiibo_bar_draw(ImGuiIO &io, float scale, ImFont *font) {
 void amiibo_settings_rows(void) {
     opt_section("amiibo");
     bool daily = amiibo_daily();
-    if (opt_toggle("One scan a day per figure", &daily, true,
-                   "The game's own rule: each amiibo gives its items once a day. Off, every tap is a new figure to the "
-                   "game, as many times as you like."))
+    if (opt_toggle("One scan a day per figure", &daily, false,
+                   "Off (the default): no limit - every tap is a new figure to the game, as many times as you like. On: "
+                   "the game's own rule, each amiibo gives its items once a day."))
         amiibo_set_daily(daily);
     uint64_t fav[64];
     int nf = amiibo_favourites(fav, 64);
