@@ -50,6 +50,7 @@
 #include "../rt.h"
 #include "../settings.h"
 #include "../framepace.h"
+#include "../ability.h"
 #include "../window_size.h"
 
 extern volatile int g_movie_playing;  // runtime/hle/movie.c: video decoders running
@@ -435,9 +436,13 @@ void rt_vfr_update(uint64_t vfr) {
     }
     bool held = VF(uint8_t, vfr, VFR_OVERRIDE) && ratio > 1;  // (stage loading: the game asks for single steps)
     if (held) ratio = 1;
+    // (WSword) Slow Time (runtime/ability.c): the world's step shortened while it runs - never paused, in a menu or a
+    // cutscene; the time it doesn't hand out is not owed afterwards
+    float slowed = ability_time_scale(paused || held || in_menu() || in_event());
+    if (slowed < 1) ratio *= slowed;
     if (!paused) {
         given += ratio / 30.0;
-        if (held || fabs(real - given) > 0.25) real = given;  // (nothing owed for a deliberate slow down)
+        if (held || slowed < 1 || fabs(real - given) > 0.25) real = given;  // (nothing owed for a deliberate slow down)
     }
     // The interval switches some of the game's code between its 60 fps and 30 fps ways: only on a lasting change of
     // the frame rate (above ~43 fps: 1; below ~35: 2; below ~23: 3), never back and forth from one frame to the next.

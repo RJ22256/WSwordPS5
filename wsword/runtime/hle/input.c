@@ -24,6 +24,7 @@
 #include "../framepace.h"
 #include "../pc_cursor.h"
 #include "../amiibo.h"
+#include "../ability.h"
 
 enum {
     BTN_A = 0, BTN_B, BTN_X, BTN_Y, BTN_LSTICK, BTN_RSTICK, BTN_L, BTN_R, BTN_ZL, BTN_ZR, BTN_PLUS, BTN_MINUS,
@@ -845,6 +846,7 @@ static void fill_state(Cpu *c) {
         amiibo_bar_filter(&mine, &bar_rx, &bar_ry);   // (not up: it forgets what was held)
         if (!menu && amiibo_bar_up()) b = mine, rx = 0, ry = 0;
     }
+    if (!menu) b = ability_input(b);   // (WSword: L3 + R3, Slow Time - runtime/ability.c)
     // d-pad / arrow keys walk (setting) while the stick is at rest. "At rest" has a dead zone: a controller's stick
     // never reads exactly 0 (a DualSense rests at a few hundred), which used to turn the d-pad off altogether.
     if (!menu && g_settings.dpad_move && (int64_t)lx * lx + (int64_t)ly * ly < 8000ll * 8000) {

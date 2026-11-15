@@ -450,6 +450,8 @@ static ImFont *g_menu_font, *g_menu_font_big;  // the menu window (Fira Sans); e
 static ImFont *g_sst, *g_sst_med, *g_sst_light;  // (WSword PS5) the console menu's SST, where it's found (NULL: the menu font)
 // (WSword) the amiibo bar (ui/amiibo_bar.mm): up while the game looks for a figure
 bool amiibo_bar_visible(void);
+bool ability_fx_visible(void);                         // (WSword: Slow Time's look, ui/ability_fx.mm)
+void ability_fx_draw(ImGuiIO &io, float scale);
 void amiibo_bar_draw(ImGuiIO &io, float scale, ImFont *font);
 void amiibo_settings_rows(void);
 static int g_tab = -99, g_tab_request = -2;  // (-2: no request; -1 is the start screen's Files; g_tab -99: none yet - the first)
@@ -2682,7 +2684,7 @@ static bool menu_draws(bool *pointer_hover = NULL, float *pointer_box = NULL, bo
     if (pointer_hover) *pointer_hover = hover;
     if (gyro_show) *gyro_show = gyro_on;
     return g_open.load() || g_kbd.load() == 1 || g_sizes.load() || console_is_open() || gyro_on || hover ||
-           g_settings.perf_overlay != PERF_OFF || notice_on() || amiibo_bar_visible();
+           g_settings.perf_overlay != PERF_OFF || notice_on() || amiibo_bar_visible() || ability_fx_visible();
 }
 
 bool menu_render_needed(void) { return menu_draws(); }
@@ -2769,6 +2771,7 @@ void menu_render(void *cmd, uint32_t target_w, uint32_t target_h) {
 
     if (g_settings.perf_overlay != PERF_OFF) perf_overlay_draw(io, scale);
     if (notice_on()) notice_draw(io, scale);
+    if (ability_fx_visible()) ability_fx_draw(io, scale);   // (under the amiibo bar and the menus)
     if (!open && amiibo_bar_visible()) amiibo_bar_draw(io, scale, g_sst ? g_sst : g_menu_font);
     if (!open && !kbd && !sizes && !con && gyro_scene_show) gyro_scene_draw(io, scale, gyro_scene);
 
