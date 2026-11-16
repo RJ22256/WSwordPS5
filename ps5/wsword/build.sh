@@ -71,6 +71,7 @@ mkdir -p "$app/colour-luts" && cp "$w"/third_party/luts/*.cube "$w"/third_party/
 cp "$w/third_party/lsfg-vk/LICENSE.md" "$app/lsfg-vk-LICENSE.md"
 cp "$w/third_party/FidelityFX/LICENSE.txt" "$app/FidelityFX-LICENSE.txt"
 rm -rf "$app/assets" "$app/shaders"  # (the template's samples' assets, not WSword's)
+cp "$ps5/assets/wsword-emblem.png" "$app/"  # (the WSword Shirt's emblem: light_sword.mm looks beside eboot.bin)
 echo "==> WSword $(cat "$w/VERSION") for the PS5: $app"
 # The eboot's symbols beside it (WSword.sym: address, kind, name), for the console's crash reports: their RIP and
 # backtrace are addresses in the title's image (the image's base as the report shows it, less its load address)

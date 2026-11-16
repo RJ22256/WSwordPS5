@@ -1,6 +1,6 @@
 // (WSword PS5) On the console only the WSword shirt is made (LS_SHIRT_ONLY, below: Mods > WSword Shirt - make_shirt_mod):
 // the Nintendo Switch Shirt's colour picture and inventory picture made the WSword shirt's from the player's own game
-// files, with the WSword emblem (assets/wsword-emblem.png in the title folder), and its name and description in every
+// files, with the WSword emblem (wsword-emblem.png beside eboot.bin), and its name and description in every
 // language - no sword, no chest, nothing in the saves. The rest of this file is the Android / PC sword's, compiled out.
 //
 // (WSword, experimental) The Sword of Light: a sword infused with light, made like the Master Sword - its strength runs
@@ -2109,10 +2109,11 @@ static void make_shirt_mod(void) {
     char ep[1100] = "";
     {   // (the title folder's assets/, where ps5/assets.json puts it: the executable's folder, else /app0)
         struct stat st;
-        for (std::string c : {std::string(rt_exe_dir()) + "/assets/wsword-emblem.png", std::string("/app0/assets/wsword-emblem.png")})
+        for (std::string c : {std::string(rt_exe_dir()) + "/wsword-emblem.png", std::string("/app0/wsword-emblem.png"),
+                          std::string(rt_exe_dir()) + "/assets/wsword-emblem.png", std::string("/app0/assets/wsword-emblem.png")})
             if (!ep[0] && stat(c.c_str(), &st) == 0) snprintf(ep, sizeof ep, "%s", c.c_str());
         if (!ep[0] && !rt_resource("assets/wsword-emblem.png", "assets/artwork/wsword-emblem.png", ep, sizeof ep))
-            fail("the WSword emblem isn't in the title folder (assets/wsword-emblem.png)");
+            fail("the WSword emblem isn't in the title folder (wsword-emblem.png, beside eboot.bin)");
     }
     int ew, eh, en;
     unsigned char *e = stbi_load(ep, &ew, &eh, &en, 4);

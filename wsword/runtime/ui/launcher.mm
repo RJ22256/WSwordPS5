@@ -1574,7 +1574,7 @@ static float h_approach(float cur, float target, float rate) {
 }
 
 extern "C" bool menu_console_start_settings(float scale, void (*prelaunch)(float));   // (menu.mm: the start screen's Settings)
-#define WSWORD_PS5_RELEASE "0.3.31-m4"   // (this release's tag, without the v: bumped with docs/releases/m4.<n>.md)
+#define WSWORD_PS5_RELEASE "0.3.32-m4"   // (this release's tag, without the v: bumped with docs/releases/m4.<n>.md)
 static int slick_main(ImVec2 ds, SDL_Window *win, const std::string &status, bool busy) {
     ImDrawList *dl = ImGui::GetWindowDrawList();
     ImVec2 o = ImGui::GetWindowPos();

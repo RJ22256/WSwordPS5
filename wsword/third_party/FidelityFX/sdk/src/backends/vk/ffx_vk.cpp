@@ -1117,17 +1117,62 @@ void ConvertUTF16ToUTF8(const wchar_t* inputName, char* outputBuffer, size_t out
     }
 }
 #else
+// WSword: by hand rather than std::wstring_convert, which throws std::range_error on a character it can't convert -
+// uncaught, it ended the game on the PS5 as frame generation started (a debug label). These never throw: a bad
+// sequence becomes '?', and the output is always terminated within outputLen.
 void ConvertUTF8ToUTF16(const char* inputName, wchar_t* outputBuffer, size_t outputLen)
 {
+    if (outputLen == 0) return;
     memset(outputBuffer, 0, outputLen * sizeof(wchar_t));
-    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> converter;
-    wcscpy_s(outputBuffer, outputLen, converter.from_bytes(inputName).c_str());
+    const unsigned char* p = reinterpret_cast<const unsigned char*>(inputName ? inputName : "");
+    size_t o = 0;
+    while (*p && o + 1 < outputLen)
+    {
+        uint32_t c = *p++;
+        int more = c >= 0xF0 && c < 0xF8 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : c >= 0x80 ? -1 : 0;
+        if (more < 0) { outputBuffer[o++] = L'?'; continue; }
+        c &= more == 3 ? 0x07 : more == 2 ? 0x0F : more == 1 ? 0x1F : 0x7F;
+        bool ok = true;
+        for (int i = 0; i < more; ++i)
+        {
+            if ((*p & 0xC0) != 0x80) { ok = false; break; }
+            c = (c << 6) | (*p++ & 0x3F);
+        }
+        if (!ok || c > 0x10FFFF) c = '?';
+        if (sizeof(wchar_t) == 2 && c > 0xFFFF)
+        {
+            if (o + 2 >= outputLen) break;
+            c -= 0x10000;
+            outputBuffer[o++] = static_cast<wchar_t>(0xD800 + (c >> 10));
+            outputBuffer[o++] = static_cast<wchar_t>(0xDC00 + (c & 0x3FF));
+        }
+        else
+            outputBuffer[o++] = static_cast<wchar_t>(c);
+    }
 }
 void ConvertUTF16ToUTF8(const wchar_t* inputName, char* outputBuffer, size_t outputLen)
 {
+    if (outputLen == 0) return;
     memset(outputBuffer, 0, outputLen * sizeof(char));
-    std::wstring_convert<std::codecvt_utf8<wchar_t>, wchar_t> converter;
-    strcpy_s(outputBuffer, outputLen, converter.to_bytes(inputName).c_str());
+    const wchar_t* p = inputName ? inputName : L"";
+    size_t o = 0;
+    for (; *p; ++p)
+    {
+        uint32_t c = static_cast<uint32_t>(*p);
+        if (c >= 0xD800 && c < 0xDC00 && p[1] >= 0xDC00 && p[1] < 0xE000)  // a UTF-16 pair
+            c = 0x10000 + ((c - 0xD800) << 10) + (static_cast<uint32_t>(*++p) - 0xDC00);
+        else if ((c >= 0xD800 && c < 0xE000) || c > 0x10FFFF)
+            c = '?';
+        char b[4];
+        int n;
+        if (c < 0x80) { b[0] = static_cast<char>(c); n = 1; }
+        else if (c < 0x800) { b[0] = static_cast<char>(0xC0 | (c >> 6)); b[1] = static_cast<char>(0x80 | (c & 0x3F)); n = 2; }
+        else if (c < 0x10000) { b[0] = static_cast<char>(0xE0 | (c >> 12)); b[1] = static_cast<char>(0x80 | ((c >> 6) & 0x3F)); b[2] = static_cast<char>(0x80 | (c & 0x3F)); n = 3; }
+        else { b[0] = static_cast<char>(0xF0 | (c >> 18)); b[1] = static_cast<char>(0x80 | ((c >> 12) & 0x3F)); b[2] = static_cast<char>(0x80 | ((c >> 6) & 0x3F)); b[3] = static_cast<char>(0x80 | (c & 0x3F)); n = 4; }
+        if (o + n >= outputLen) break;
+        memcpy(outputBuffer + o, b, n);
+        o += n;
+    }
 }
 #endif  // _WIN32
 
