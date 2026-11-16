@@ -156,7 +156,11 @@ void settings_load(void) {
         else if (!strcmp(key, "lossless_performance")) g_settings.lsfg_perf = atoi(val) != 0;
         else if (!strcmp(key, "reshade")) g_settings.reshade = !strcmp(val, "on");
         else if (!strcmp(key, "reshade_depth")) g_settings.reshade_own_depth = !strcmp(val, "reshade");
-        else if (!strcmp(key, "ray_tracing") || !strcmp(key, "ray_traced_shadows")) g_settings.rt_shadows = !strcmp(val, "on");
+        else if (!strcmp(key, "ray_tracing") || !strcmp(key, "ray_traced_shadows")) {
+#ifndef __PROSPERO__  // (0.3.31: Ray-Tracing removed on the PS5 - a saved "on" stays off)
+            g_settings.rt_shadows = !strcmp(val, "on");
+#endif
+        }
         else if (!strcmp(key, "mods_off")) snprintf(g_settings.mods_off, sizeof g_settings.mods_off, "%s", val);
         else if (!strcmp(key, "dlss_frame_generation")) {  // (WSword: off | 2x | 3x | 4x)
             int n = atoi(val);
@@ -399,8 +403,8 @@ void settings_save(void) {
 #ifdef __PROSPERO__
 // (the PS5) Both modes draw the game at 1440p, the TV's output (settings_ps5_output_height): the GPU has the room (about
 // a third busy at 1080p60 - the game's own thread on the CPU is the limit, not the pixels). Performance: 60 fps, the
-// game's own draw distance and the shadow maps one step up. Quality: 30 fps with Ray-Tracing (shadows, ambient
-// occlusion, water reflections), High draw distance and the biggest shadow maps. On a 4K TV, AMD FSR scales the
+// game's own draw distance and the shadow maps one step up. Quality: 30 fps, High draw distance and the biggest
+// shadow maps (0.3.31: no Ray-Tracing - removed on the PS5). On a 4K TV, AMD FSR scales the
 // 1440p picture up to 2160p (1.5x: FSR 1 on the console, FSR 3's upscaling being held back); on a smaller one (a 1080p TV) the game draws at its own height.
 static int g_ps5_out_h = 1440;
 // The most the game draws at: 1440p, or 1080p with Video > Resolution's "from 1080p" choices (AMD FSR up from there)
@@ -422,7 +426,11 @@ static void mode_into(Settings *s, int mode) {
     bool fg = s->lsfg > 0 || s->frame_gen;
     int game = q ? 30 : 60, shown = fg ? game * 2 : game;
     s->fps_limit = shown <= g_ps5_hz ? shown : game;
+#ifdef __PROSPERO__
+    s->rt_shadows = false;  // (0.3.31: Ray-Tracing removed on the PS5)
+#else
     s->rt_shadows = q;
+#endif
     s->draw_distance = q ? DRAWDIST_HIGH : DRAWDIST_ORIGINAL;  // (High, not Extreme+: the player found that buggy)
     s->shadow_res = q ? SHADOW_EXTREME : SHADOW_HIGH;
     int cap = settings_ps5_render_height_cap(), target = g_ps5_out_h < cap ? g_ps5_out_h : cap;

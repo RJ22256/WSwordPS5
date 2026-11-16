@@ -290,7 +290,7 @@ bool menu_handle_event(const SDL_Event *e) {
             return true;
         }
         if (!e->key.repeat && e->key.scancode == SDL_SCANCODE_F6 && !typing) {  // (WSword) Ray-Tracing on / off
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(__PROSPERO__)  // (0.3.31: Ray-Tracing removed on the PS5)
             if (rts_available()) {
                 g_settings.rt_shadows = !g_settings.rt_shadows;
                 settings_save();
@@ -807,7 +807,7 @@ static bool g_colour_own_page;
 static void tab_display(void) {
     float scale = ImGui::GetFontSize() / 34;
     opt_begin("##video", scale);
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !defined(__PROSPERO__)  // (the PS5: Ray-Tracing removed, 0.3.31)
     // (0.3.15, Glass Slate 2) Ray-Tracing first on the page, as a card: the switch and its F6
     {   // (WSword) ray-traced sun shadows (vulkan/rtshadow.c): GPUs with hardware ray tracing
         char st[300];
@@ -834,8 +834,7 @@ static void tab_display(void) {
         static const bool avail[MODE_COUNT + 1] = {true, true, false};
         const char *md = "Both modes draw the game at up to 1440p (Resolution, below, says what the TV gets). "
                          "Performance: 60 fps - the game's own draw distance, sharper shadows. "
-                         "Quality: 30 fps with Ray-Tracing (shadows, ambient occlusion, water reflections), High draw "
-                         "distance and the sharpest shadows. With frame generation (below), Performance shows 120 on a "
+                         "Quality: 30 fps with High draw distance and the sharpest shadows. With frame generation (below), Performance shows 120 on a "
                          "120 Hz TV and Quality 60. Custom: your own settings below.";
 #else
         static const char *const mn[MODE_COUNT + 1] = {"Battery", "Performance", "Turbo", "Unlocked", "Custom"};
@@ -859,10 +858,9 @@ static void tab_display(void) {
         if (started < 0) started = g_settings.ps5_resolution;
         char rd[900];
         snprintf(rd, sizeof rd, "%s%s",
-                 tr("1080p: the game drawn at 1080p, for a 1080p TV - the lightest on the GPU, the most room for "
-                    "Ray-Tracing. 1440p: drawn at 1440p and shown as it is (native 1440p). 4K: drawn at 1440p, AMD FSR "
+                 tr("1080p: the game drawn at 1080p, for a 1080p TV - the lightest on the GPU. 1440p: drawn at 1440p and shown as it is (native 1440p). 4K: drawn at 1440p, AMD FSR "
                     "scales it up to 4K. 1440p from 1080p / 4K from 1080p: drawn at 1080p and scaled up by AMD FSR to 1440p or 4K - "
-                    "lighter on the GPU than drawing at 1440p (more room for Ray-Tracing and a steadier frame rate), a "
+                    "lighter on the GPU than drawing at 1440p (a steadier frame rate), a "
                     "little softer. Automatic: the TV's own - 4K where it has it (drawn at 1440p and scaled up), "
                     "else 1440p or 1080p; with frame generation on, 120 Hz comes before a bigger size. A size chosen "
                     "here comes first, at 120 Hz where the TV takes it at that size. A TV without the size gets the "
@@ -1900,7 +1898,9 @@ static void quick_toggles(ImDrawList *dl, ImVec2 a, ImVec2 b, float scale) {
     struct Q { const char *id; std::string text; bool on, enabled; int what; };
     std::vector<Q> q;
 #ifndef __APPLE__
+#ifndef __PROSPERO__  // (0.3.31: Ray-Tracing removed on the PS5)
     q.push_back({"##qrt", tr("Ray-Tracing"), g_settings.rt_shadows && rts_available(), rts_available(), 0});
+#endif
     int fv = g_settings.dlssg > 0 ? 4 + g_settings.dlssg : g_settings.lsfg > 0 ? 1 + g_settings.lsfg : g_settings.frame_gen ? 1 : 0;
     static int fg_last = 1;  // (the frame generation turned back on: the last one on this session, else AMD FSR 3)
     if (fv) fg_last = fv;
@@ -2088,7 +2088,7 @@ static void console_tabs_body(float scale, bool in_game) {
 // ------------------------------------------------------------------ (WSword PS5) the console menu
 // Opened and closed by a two-finger tap on the touch pad (menu_handle_event). In the PS5's own manner and WSword's
 // black: first the quick menu - a sheet rising from the bottom over the dimmed game, its tiles following one after
-// another (Resume, Mode, Ray-Tracing, Frame generation, Performance overlay) and a ring gliding to the chosen one;
+// another (Resume, Mode, Ray-Tracing - not on the PS5 -, Frame generation, Performance overlay) and a ring gliding to the chosen one;
 // All settings opens the full settings - every option of the menu before it, in categories down the left (L1 / R1,
 // a bar gliding to the open one) and their rows easing in on the right (runtime/ui/option_rows.mm, the console look),
 // the selected row's description along the foot. Circle goes back a step; closing lets the sheet sink away first.
@@ -2219,10 +2219,16 @@ static void c_quick(ImGuiIO &io, float s, float closing) {
     static float k_rt = -1, k_fg = -1, pill_mode = -1, pill_ov = -1;
     if (k_rt < 0) k_rt = rt, k_fg = fv != 0;
     k_rt = c_approach(k_rt, rt ? 1.0f : 0.0f), k_fg = c_approach(k_fg, fv ? 1.0f : 0.0f);
-    float gap = 14 * s, ty0 = y0 + 96 * s, th = 150 * s, tw5 = (x1 - x0 - 2 * pad - 4 * gap) / 5;
+#ifdef __PROSPERO__  // (0.3.31: Ray-Tracing removed - Resume, Mode, Frame generation, Performance overlay)
+    static const int k_tiles[] = {0, 1, 3, 4};
+#else
+    static const int k_tiles[] = {0, 1, 2, 3, 4};
+#endif
+    const int ntiles = (int)(sizeof k_tiles / sizeof *k_tiles);
+    float gap = 14 * s, ty0 = y0 + 96 * s, th = 150 * s, tw5 = (x1 - x0 - 2 * pad - (ntiles - 1) * gap) / ntiles;
     ImVec4 target = g_ring;
     bool any_hot = false;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < ntiles; i++) {
         float e = c_ease((float)(now - base - 0.06 - i * 0.04) / 0.34f) * (1 - closing), tdy = 12 * s * (1 - e);
         ImVec2 a0(x0 + pad + i * (tw5 + gap), ty0 + tdy), a1(a0.x + tw5, a0.y + th);
         ImGui::SetCursorScreenPos(ImVec2(a0.x, ty0));
@@ -2238,7 +2244,7 @@ static void c_quick(ImGuiIO &io, float s, float closing) {
         dl->AddRectFilled(a0, a1, c_fade(bg, e), 16 * s);
         float lx = a0.x + 20 * s, ly = a0.y + 20 * s, lfs = 17 * s;
         ImU32 label = c_fade(IM_COL32(161, 161, 168, 255), e), ink = c_fade(IM_COL32(242, 242, 243, 255), e);
-        switch (i) {
+        switch (k_tiles[i]) {
         case 0: {  // Resume
             ImU32 black = c_fade(IM_COL32(0, 0, 0, 255), e);
             dl->AddTriangleFilled(ImVec2(lx, ly), ImVec2(lx, ly + 22 * s), ImVec2(lx + 18 * s, ly + 11 * s), black);

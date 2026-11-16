@@ -471,9 +471,13 @@ static void create_device(void) {
     // (WSword) ray tracing for the ray-traced sun shadows (rtshadow.c): acceleration structures, ray queries, transform
     // feedback (the shadow casters' triangles) and push descriptors, where the GPU has all of them (on whether the
     // setting is on or not: it turns on and off in the game). SAVAGEWIND_NO_RT=1: never.
+#ifdef __PROSPERO__
+    bool rt = false;  // (WSword PS5 0.3.31: Ray-Tracing removed - its extensions never asked for, rtshadow.c never set up)
+#else
     bool rt = !getenv("SAVAGEWIND_NO_RT") && has_ext(ep, ne, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
               has_ext(ep, ne, VK_KHR_RAY_QUERY_EXTENSION_NAME) && has_ext(ep, ne, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) &&
               has_ext(ep, ne, VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME) && has_ext(ep, ne, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+#endif
     free(ep);
 
     // features the backend relies on (all present on current desktop drivers)
