@@ -32,12 +32,17 @@
 #define STB_IMAGE_WRITE_STATIC
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "../../third_party/stb/stb_image_write.h"
+#define SIMPLEWEBP_IMPLEMENTATION   // (a few of AmiiboAPI's pictures are WebP, under .png names: stb reads no WebP)
+#include "../../third_party/simplewebp/simplewebp.h"
 
 #include "../amiibo.h"
 #include "option_rows.h"
 extern "C" {
 #include "../platform.h"
 uint64_t vk_imgui_texture_rgba(const void *rgba, int w, int h);  // runtime/nvn/vulkan/imgui_glue.cpp
+extern "C" void vk_imgui_texture_release(uint64_t id);             // (the same: freed, no wait - the GPU is done with it)
+extern "C" uint64_t vk_pending_seq(void);                         // runtime/nvn/vulkan: submissions' numbers
+extern "C" uint64_t vk_completed_seq(void);
 }
 #ifdef __ANDROID__
 #include <jni.h>
@@ -169,10 +174,32 @@ std::atomic<bool> g_running{false}, g_stop{false};
 std::atomic<int> g_generation{0};   // (bumped when pictures change: the bar's textures are made again)
 std::vector<uint64_t> g_queue;
 
+// a downloaded picture's pixels (RGBA): PNG / JPEG by stb, WebP by simplewebp; free with stbi_image_free
+unsigned char *load_rgba(const std::string &path, int *w, int *h, int *n) {
+    FILE *f = fopen(path.c_str(), "rb");
+    if (!f) return NULL;
+    unsigned char head[12] = {0};
+    size_t got = fread(head, 1, sizeof head, f);
+    fclose(f);
+    if (got < 12 || memcmp(head, "RIFF", 4) || memcmp(head + 8, "WEBP", 4)) return stbi_load(path.c_str(), w, h, n, 4);
+    simplewebp *webp = NULL;
+    if (simplewebp_load_from_filename(path.c_str(), NULL, &webp) != SIMPLEWEBP_NO_ERROR || !webp) return NULL;
+    size_t ww = 0, hh = 0;
+    simplewebp_get_dimensions(webp, &ww, &hh);
+    unsigned char *px = NULL;
+    if (ww && hh && ww <= 8192 && hh <= 8192) {
+        px = (unsigned char *)STBI_MALLOC(ww * hh * 4);   // (so stbi_image_free frees it)
+        if (px && simplewebp_decode(webp, px, NULL) != SIMPLEWEBP_NO_ERROR) STBI_FREE(px), px = NULL;
+    }
+    simplewebp_unload(webp);
+    if (px) *w = (int)ww, *h = (int)hh, *n = 4;
+    return px;
+}
+
 // a downloaded picture made small: fit in MAX_SIDE, a box filter, as a PNG at dest
 bool shrink(const std::string &src, const std::string &dest) {
     int w, h, n;
-    unsigned char *px = stbi_load(src.c_str(), &w, &h, &n, 4);
+    unsigned char *px = load_rgba(src, &w, &h, &n);
     if (!px) return false;
     float k = fminf(1.0f, (float)MAX_SIDE / (float)(w > h ? w : h));
     int ow = (int)fmaxf(1, roundf(w * k)), oh = (int)fmaxf(1, roundf(h * k));
@@ -240,8 +267,36 @@ int count_present(void) {
 }
 
 // ------------------------------------------------------------------ the bar's textures (render thread)
-struct Pic { ImTextureID tex; float w, h; };
+struct Pic { ImTextureID tex; float w, h; int used; };   // (used: the frame it was last drawn in)
 std::unordered_map<uint64_t, Pic> g_pics;   // (tex 0: none on disk - tried)
+// The UI has room for a few hundred textures (descriptor sets) in all, and there are 900+ figures: at most MAX_TEX
+// pictures are kept, the one drawn longest ago let go for the next. A texture let go may still be in frames the GPU
+// hasn't finished: it's freed once two frames have passed (its last frame submitted) and that submission completed.
+const int MAX_TEX = 40;
+int g_ntex;
+struct Retired { ImTextureID tex; int frame; uint64_t seq; };
+std::vector<Retired> g_retired;
+void reap(int frame) {
+    for (size_t i = 0; i < g_retired.size();) {
+        Retired &r = g_retired[i];
+        if (!r.seq && frame >= r.frame + 2) r.seq = vk_pending_seq();   // (the frames that drew it are submitted by now)
+        if (r.seq && vk_completed_seq() >= r.seq) {
+            vk_imgui_texture_release((uint64_t)r.tex);
+            g_retired.erase(g_retired.begin() + (long)i);
+        } else i++;
+    }
+}
+void make_room(int frame) {
+    while (g_ntex >= MAX_TEX) {
+        auto oldest = g_pics.end();
+        for (auto it = g_pics.begin(); it != g_pics.end(); ++it)
+            if (it->second.tex && it->second.used < frame && (oldest == g_pics.end() || it->second.used < oldest->second.used)) oldest = it;
+        if (oldest == g_pics.end()) return;   // (all drawn this frame: no room - the new one waits)
+        g_retired.push_back({oldest->second.tex, frame, 0});
+        g_pics.erase(oldest);
+        g_ntex--;
+    }
+}
 int g_pics_gen = -1;
 int g_loads_this_frame, g_frame = -1;
 }  // namespace
@@ -253,19 +308,25 @@ ImTextureID amiibo_pic(uint64_t id, float *w, float *h) {
         for (auto it = g_pics.begin(); it != g_pics.end();) it = it->second.tex ? std::next(it) : g_pics.erase(it);
         g_pics_gen = g_generation.load();
     }
+    int frame = ImGui::GetFrameCount();
+    if (frame != g_frame) g_frame = frame, g_loads_this_frame = 0, reap(frame);
     auto it = g_pics.find(id);
-    if (it != g_pics.end()) { *w = it->second.w, *h = it->second.h; return it->second.tex; }
-    if (ImGui::GetFrameCount() != g_frame) g_frame = ImGui::GetFrameCount(), g_loads_this_frame = 0;
+    if (it != g_pics.end()) { it->second.used = frame; *w = it->second.w, *h = it->second.h; return it->second.tex; }
     if (g_loads_this_frame >= 3) { *w = *h = 0; return 0; }   // (the rest next frame: no hitch as the bar opens)
-    g_loads_this_frame++;
-    Pic p = {0, 0, 0};
     std::string path = pic_path(id);
+    if (exists(path)) {
+        make_room(frame);
+        if (g_ntex >= MAX_TEX) { *w = *h = 0; return 0; }   // (no room this frame)
+    }
+    g_loads_this_frame++;
+    Pic p = {0, 0, 0, frame};
     if (exists(path)) {
         int iw, ih, n;
         if (unsigned char *px = stbi_load(path.c_str(), &iw, &ih, &n, 4)) {
             p.tex = (ImTextureID)vk_imgui_texture_rgba(px, iw, ih);
             p.w = (float)iw, p.h = (float)ih;
             stbi_image_free(px);
+            if (p.tex) g_ntex++;
         }
     }
     g_pics[id] = p;

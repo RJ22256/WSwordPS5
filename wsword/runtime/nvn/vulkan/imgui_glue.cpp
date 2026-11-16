@@ -21,7 +21,7 @@ extern "C" bool vk_imgui_backend_init(void) {
     ii.Device = g_vk.dev;
     ii.QueueFamily = g_vk.qfam;
     ii.Queue = g_vk.queue;
-    ii.DescriptorPoolSize = 64;
+    ii.DescriptorPoolSize = 256;  // (one per texture: the font, the start screen's pictures, the amiibo bar's - at most 40 of those)
     ii.MinImageCount = 2;
     // vertex buffers rotate per image: cover frames in flight (twice: frame generation draws the menu on both frames)
     ii.ImageCount = 2 * (g_vk.sc_count > 3 ? g_vk.sc_count : 3) + 1;
@@ -94,6 +94,17 @@ extern "C" uint64_t vk_imgui_texture_rgba(const void *rgba, int w, int h) {
     return id;
 }
 
+// (amiibo_pics.mm's pictures, let go only once the GPU has finished the frames that drew them: no wait here)
+extern "C" void vk_imgui_texture_release(uint64_t id) {
+    for (size_t i = 0; i < g_textures.size(); i++) {
+        if (g_textures[i].id != id) continue;
+        ImGui_ImplVulkan_RemoveTexture((VkDescriptorSet)id);
+        vkDestroyImageView(g_vk.dev, g_textures[i].view, NULL);
+        vmaDestroyImage(g_vk.vma, g_textures[i].img, g_textures[i].mem);
+        g_textures.erase(g_textures.begin() + i);
+        return;
+    }
+}
 extern "C" void vk_imgui_texture_free(uint64_t id) {
     for (size_t i = 0; i < g_textures.size(); i++) {
         if (g_textures[i].id != id) continue;
