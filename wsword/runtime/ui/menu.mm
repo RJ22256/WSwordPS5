@@ -2347,9 +2347,9 @@ static void console_controls(float rs) {  // the Controls category: the d-pad, t
     opt_section("Movement");
     opt_toggle("D-pad as left stick", &g_settings.dpad_move, false,
                "The d-pad (and the arrow keys) also move like the left stick while the stick is at rest.");
+    amiibo_settings_rows();   // (WSword: the amiibo bar's, ui/amiibo_bar.mm - its Pictures first: 0.3.31-m4, above the long bindings)
     opt_section("Buttons");
     controls_bindings_draw(ImGui::GetFontSize() / 34);
-    amiibo_settings_rows();   // (WSword: the amiibo bar's, ui/amiibo_bar.mm)
     opt_section("Menu");
     opt_action("Open or close this menu", tr("Two-finger tap"), "Rest two fingers on the touch pad, without clicking it, and lift "
                "them. The game never reads the touch pad's touches, so nothing in it answers.", false);

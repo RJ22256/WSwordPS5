@@ -1573,6 +1573,7 @@ static float h_approach(float cur, float target, float rate) {
     return fabsf(n - target) < 0.05f ? target : n;
 }
 
+#define WSWORD_PS5_RELEASE "0.3.31-m4"   // (this release's tag, without the v: bumped with docs/releases/m4.<n>.md)
 static int slick_main(ImVec2 ds, SDL_Window *win, const std::string &status, bool busy) {
     ImDrawList *dl = ImGui::GetWindowDrawList();
     ImVec2 o = ImGui::GetWindowPos();
@@ -1610,7 +1611,8 @@ static int slick_main(ImVec2 ds, SDL_Window *win, const std::string &status, boo
     {
         std::string gv = glass_game_version(ready);
         char sub[256];
-        snprintf(sub, sizeof sub, "%s%s%s   \xc2\xb7   PS5", gv.empty() ? "" : tr("Game"), gv.empty() ? "" : " ", gv.c_str());
+        snprintf(sub, sizeof sub, "%s%s%s   \xc2\xb7   PS5 v" WSWORD_PS5_RELEASE, gv.empty() ? "" : tr("Game"), gv.empty() ? "" : " ",
+                 gv.c_str());
         const char *line = gv.empty() ? sub + strlen("   \xc2\xb7   ") : sub;
         dl->AddText(ft, 17 * s, P(tx + 2 * s, top + 46 * s), grey, line);
     }
