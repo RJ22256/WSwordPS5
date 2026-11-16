@@ -40,5 +40,7 @@ The title starts from [mihawk-99's PS5 Vulkan Template](https://github.com/mihaw
 - Mesa / RADV (MIT), the payload SDK's platform layer (GPL-3.0-or-later): the title links them, so the title as built is GPL-3.0-or-later. The foundation's own files keep their MIT notices (`LICENSE.md`).
 - WSword is built on [Savage Wind Recomp](https://github.com/Revivedx/SavageWindRecomp) (MIT).
 - The amiibo bar's list of figures (their public ids and names) comes from [AmiiboAPI](https://github.com/N3evin/AmiiboAPI) (MIT); no figure's data or keys.
+- [simplewebp](https://github.com/MikuAuahDark/simplewebp) (BSD-3-Clause, `wsword/third_party/simplewebp`): the amiibo pictures AmiiboAPI serves as WebP.
+- The WSword Shirt (Mods) is made on the console from your own game files; only WSword's emblem (`ps5/assets/wsword-emblem.png`) ships.
 
 WSword PS5 is not affiliated with Sony, Nintendo, NVIDIA or the projects above.

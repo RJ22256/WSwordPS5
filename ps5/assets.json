@@ -36,6 +36,19 @@
       "licence": "CC0-1.0",
       "url": "https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Lantern",
       "changes": "parent nodes centre it and scale it to 1.6, 5.5 and 8 tall, one .gltf for each sample"
+    },
+    {
+      "path": "wsword-emblem.png",
+      "from": "file",
+      "source": "ps5/assets/wsword-emblem.png",
+      "used_by": [
+        "*"
+      ],
+      "title": "WSword emblem",
+      "author": "RJ22256 (the WSword app's own art)",
+      "licence": "Own work, shipped with the author's permission",
+      "url": "https://github.com/RJ22256/wswordps5",
+      "changes": "none: Mods > WSword Shirt draws it onto the player's own shirt picture on the console"
     }
   ]
 }

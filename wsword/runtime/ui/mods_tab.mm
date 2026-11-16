@@ -88,6 +88,7 @@ static void open_mods_folder(void) {
     SDL_OpenURL(url.c_str());
 }
 
+void light_sword_rows(void);  // (ui/light_sword.mm)
 void mods_tab_draw(float scale, bool in_game) {
     opt_begin("##mods", scale);
     opt_section("Mods");
@@ -133,6 +134,8 @@ void mods_tab_draw(float scale, bool in_game) {
                               "the game at the title screen without it."));
         ImGui::PopTextWrapPos();
     }
+    ImGui::Spacing();
+    light_sword_rows();  // (ui/light_sword.mm: on the PS5, the WSword Shirt)
     ImGui::Spacing();
     pthread_mutex_lock(&g_lock);
     bool busy = g_busy;
