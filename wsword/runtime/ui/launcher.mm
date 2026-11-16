@@ -1573,6 +1573,7 @@ static float h_approach(float cur, float target, float rate) {
     return fabsf(n - target) < 0.05f ? target : n;
 }
 
+extern "C" bool menu_console_start_settings(float scale, void (*prelaunch)(float));   // (menu.mm: the start screen's Settings)
 #define WSWORD_PS5_RELEASE "0.3.31-m4"   // (this release's tag, without the v: bumped with docs/releases/m4.<n>.md)
 static int slick_main(ImVec2 ds, SDL_Window *win, const std::string &status, bool busy) {
     ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -2535,7 +2536,6 @@ extern "C" void launcher_run(const char *root, int mode) {
                 // loaded game say so
 #ifdef __PROSPERO__  // (0.3.31-m4: the console menu's All settings, Files first and Saves last - menu.mm)
                 {
-                    extern bool menu_console_start_settings(float scale, void (*prelaunch)(float));
                     float sc = ds.y / 1080.0f;
                     bool back = menu_console_start_settings(sc, prelaunch_tab);
                     int cap_dev;

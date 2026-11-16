@@ -2464,7 +2464,7 @@ static void c_push_black(void) {
 // (0.3.31-m4, from WSword Android) The start screen's Settings in this look (launcher.mm): the categories - Files
 // first, Saves last - down the left, the rows on the right, the description and the prompts along the foot. True when
 // Circle asked to leave (not while a list, the keyboard or a question is open).
-bool menu_console_start_settings(float scale, void (*prelaunch)(float)) {
+extern "C" bool menu_console_start_settings(float scale, void (*prelaunch)(float)) {
     ImGuiIO &io = ImGui::GetIO();
     static bool was;
     static double last_frame = -1;
