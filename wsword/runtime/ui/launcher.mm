@@ -1555,6 +1555,262 @@ static int glass_main(ImVec2 ds, SDL_Window *win, const std::string &status, boo
     return action;
 }
 
+#ifdef __PROSPERO__
+// ------------------------------------------------------------------ (WSword PS5 0.3.31-m4) the start screen in the console menu's look
+// From WSword Android (0.2.8-slate.21): the in-game console menu's black and its motion (menu.mm c_quick) as the start
+// screen - the artwork dimmed behind, the app's icon, name and versions at the top left, small black chips at the top
+// right (the TV's refresh rate and resolution), and the sheet rising from the bottom: its title the journey (the last
+// save's time at its right), five tiles following one after another (Play, Mode, Saves, Mods, Settings) with the ring
+// gliding to the chosen one, then Game files (while they need setting up) and Quit; the game files' state and the GPU
+// above the sheet. Every item reachable with the controller, Play first. Returns a GlassAction.
+static float h_ease(float x) { x = x < 0 ? 0 : x > 1 ? 1 : x; float q = 1 - x; return 1 - q * q * q; }
+static ImU32 h_fade(ImU32 c, float a) {
+    int al = (int)((c >> IM_COL32_A_SHIFT & 0xff) * (a < 0 ? 0 : a > 1 ? 1 : a) + 0.5f);
+    return (c & ~IM_COL32_A_MASK) | ((ImU32)al << IM_COL32_A_SHIFT);
+}
+static float h_approach(float cur, float target, float rate) {
+    float n = cur + (target - cur) * (1 - expf(-ImGui::GetIO().DeltaTime * rate));
+    return fabsf(n - target) < 0.05f ? target : n;
+}
+
+static int slick_main(ImVec2 ds, SDL_Window *win, const std::string &status, bool busy) {
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    ImVec2 o = ImGui::GetWindowPos();
+    float s = ds.y / 1080.0f;
+    ImFont *fb = g_glass_bold ? g_glass_bold : g_font_title, *ft = g_glass_text ? g_glass_text : g_font_menu;
+    auto P = [&](float x, float y) { return ImVec2(o.x + x, o.y + y); };
+    auto tw = [&](ImFont *f, float size, const char *t) { return f->CalcTextSizeA(size, FLT_MAX, 0, t).x; };
+    const ImU32 ink = IM_COL32(242, 242, 243, 255), grey = IM_COL32(161, 161, 168, 255), dim = IM_COL32(142, 142, 150, 255);
+    static double shown_at = -1, last_frame = -1;
+    double now = ImGui::GetTime();
+    if (now - last_frame > 0.25) shown_at = now;   // (coming back to it: the sheet rises again)
+    last_frame = now;
+    float k = h_ease((float)(now - shown_at) / 0.38f);
+    int action = GA_NONE;
+    bool ready = status.empty();
+
+    // the artwork dimmed, darker toward the sheet
+    dl->AddRectFilled(P(0, 0), P(ds.x, ds.y), IM_COL32(0, 0, 0, 90));
+    dl->AddRectFilledMultiColor(P(0, ds.y * 0.35f), P(ds.x, ds.y), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0),
+                                IM_COL32(0, 0, 0, 200), IM_COL32(0, 0, 0, 200));
+    dl->AddRectFilledMultiColor(P(0, 0), P(ds.x, 220 * s), IM_COL32(0, 0, 0, 170), IM_COL32(0, 0, 0, 170),
+                                IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0));   // (the name and versions over a bright sky)
+
+    // ---- the top left: the icon, the name, the versions
+    float mx = 64 * s, top = 44 * s, logo = 60 * s;
+    icon_textures();
+    int ci = g_settings.app_icon >= 0 && g_settings.app_icon < RT_WINDOW_ICONS ? g_settings.app_icon : 0;
+    float tx = mx;
+    if (g_icon_tex[ci]) {
+        dl->AddImageRounded((ImTextureID)g_icon_tex[ci], P(mx, top), P(mx + logo, top + logo), ImVec2(0, 0), ImVec2(1, 1),
+                            IM_COL32_WHITE, logo * 0.24f);
+        tx = mx + logo + 18 * s;
+    }
+    dl->AddText(fb, 44 * s, P(tx, top - 2 * s), ink, "WSword");
+    {
+        std::string gv = glass_game_version(ready);
+        char sub[256];
+        snprintf(sub, sizeof sub, "%s%s%s   \xc2\xb7   PS5", gv.empty() ? "" : tr("Game"), gv.empty() ? "" : " ", gv.c_str());
+        const char *line = gv.empty() ? sub + strlen("   \xc2\xb7   ") : sub;
+        dl->AddText(ft, 17 * s, P(tx + 2 * s, top + 46 * s), grey, line);
+    }
+
+    // ---- the chips at the top right: the TV's refresh rate and resolution, black pills
+    {
+        std::vector<std::string> chips;
+        const SDL_DisplayMode *dm = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(win));
+        char b[96];
+        if (dm && dm->refresh_rate > 1) snprintf(b, sizeof b, "%d Hz", (int)lroundf(dm->refresh_rate)), chips.push_back(b);
+        if (dm && dm->h > 0) {
+            if (dm->h >= 2100) snprintf(b, sizeof b, "4K");
+            else snprintf(b, sizeof b, "%dp", dm->h);
+            chips.push_back(b);
+        }
+        float x = ds.x - 64 * s, cy = top + 6 * s, h = 40 * s, fs = 16 * s;
+        for (int i = (int)chips.size() - 1; i >= 0; i--) {
+            float w = tw(ft, fs, chips[i].c_str()) + 32 * s;
+            x -= w;
+            dl->AddRectFilled(P(x, cy), P(x + w, cy + h), IM_COL32(10, 10, 11, 225), h * 0.5f);
+            dl->AddRect(P(x, cy), P(x + w, cy + h), IM_COL32(46, 46, 52, 255), h * 0.5f, 0, 1.0f * s);
+            dl->AddText(ft, fs, P(x + 16 * s, cy + (h - fs) * 0.5f - 1 * s), IM_COL32(200, 200, 206, 255), chips[i].c_str());
+            x -= 10 * s;
+        }
+    }
+
+    // ---- the sheet
+    float dy = 44 * s * (1 - k);
+    float x0 = 64 * s, x1 = ds.x - 64 * s, y1 = ds.y - 48 * s + dy, h = 336 * s, y0 = y1 - h, pad = 34 * s;
+    {   // above it: the game files' state, the GPU and its driver, how to reach the menu in the game
+        float ly = y0 - 22 * s - 3 * 24 * s;
+        if (ready) {
+            float cu = 17 * s;  // (a drawn check mark: the font may have no check)
+            dl->AddLine(P(mx + cu * 0.1f, ly + cu * 0.55f), P(mx + cu * 0.38f, ly + cu * 0.85f), ink, cu * 0.13f);
+            dl->AddLine(P(mx + cu * 0.38f, ly + cu * 0.85f), P(mx + cu * 0.9f, ly + cu * 0.25f), ink, cu * 0.13f);
+            std::string dlc = dlc_summary(g_root);
+            std::string t = std::string(tr("Game files ready")) + (dlc.empty() ? "" : " + DLC");
+            dl->AddText(ft, 17 * s, P(mx + cu * 1.4f, ly), ink, t.c_str());
+        } else {
+            std::string msg = busy ? std::string(tr("Setting up the game files...")) : trv(status);
+            dl->AddCircleFilled(P(mx + 6 * s, ly + 10 * s), 5 * s, IM_COL32(240, 184, 90, 255), 16);
+            dl->AddText(ft, 17 * s, P(mx + 20 * s, ly), IM_COL32(246, 207, 138, 255), msg.c_str(), NULL, x1 - mx - 40 * s);
+        }
+        std::string driver = vk_driver_desc();
+        if (driver.size() > 48) driver.resize(48);
+        std::string gpu = std::string(vk_gpu_name()) + (driver.empty() ? "" : "   \xc2\xb7   " + driver) + "   \xc2\xb7   " +
+                          tr("In the game, a two-finger tap on the touch pad opens the menu");
+        dl->AddText(ft, 15 * s, P(mx, ly + 28 * s), dim, gpu.c_str(), NULL, x1 - mx);
+    }
+    dl->AddRectFilled(P(x0, y0), P(x1, y1), h_fade(IM_COL32(10, 10, 11, 242), k), 22 * s);
+    dl->AddRect(P(x0, y0), P(x1, y1), h_fade(IM_COL32(38, 38, 42, 255), k), 22 * s, 0, 1.2f * s);
+    // the title: the journey, the last save at the right
+    std::string last = glass_last_saved();
+    {
+        float ts = 40 * s;
+        const char *title = tr(last.empty() ? "A new journey" : "Your journey");
+        dl->AddText(fb, ts, P(x0 + pad, y0 + 24 * s), h_fade(ink, k), title);
+        dl->AddText(ft, 15 * s, P(x0 + pad + tw(fb, ts, title) + 18 * s, y0 + 24 * s + ts * 0.5f), h_fade(dim, k), "WSWORD");
+        char note[160];
+        if (last.empty()) snprintf(note, sizeof note, "%s", tr("No save yet"));
+        else snprintf(note, sizeof note, tr("Last saved %s"), last.c_str());
+        dl->AddText(ft, 18 * s, P(x1 - pad - tw(ft, 18 * s, note), y0 + 24 * s + ts * 0.36f), h_fade(grey, k), note);
+    }
+    // the tiles
+    static ImVec4 ring(-1, 0, 0, 0);
+    static float pill_mode = -1;
+    ImVec4 target = ring;
+    bool any_hot = false;
+    static bool focused_once;
+    bool first = !focused_once;
+    focused_once = true;
+    int cur_mode = settings_current_mode();
+    float gap = 14 * s, ty0 = y0 + 96 * s, th = 150 * s, tw5 = (x1 - x0 - 2 * pad - 4 * gap) / 5;
+    for (int i = 0; i < 5; i++) {
+        float e = h_ease((float)(now - shown_at - 0.06 - i * 0.04) / 0.34f), tdy = 12 * s * (1 - e);
+        ImVec2 a0 = P(x0 + pad + i * (tw5 + gap), ty0 + tdy), a1(a0.x + tw5, a0.y + th);
+        bool enabled = i != 0 || ready;
+        ImGui::SetCursorScreenPos(P(x0 + pad + i * (tw5 + gap), ty0));
+        ImGui::PushID(i);
+        if ((i == 0 && first && ready) || (i == 4 && g_refocus == SETTINGS)) {
+            ImGui::SetKeyboardFocusHere();
+            if (i == 4) g_refocus = MAIN;
+        }
+        ImGui::BeginDisabled(!enabled);
+        ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));
+        bool clicked = ImGui::InvisibleButton("##tile", ImVec2(tw5, th), ImGuiButtonFlags_EnableNav);
+        ImGui::PopStyleColor();
+        bool hot = enabled && ((ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible) || ImGui::IsItemHovered());
+        ImGui::EndDisabled();
+        ImGui::PopID();
+        if (hot) target = ImVec4(a0.x, a0.y, a1.x, a1.y), any_hot = true;
+        ImU32 bg = i == 0 ? (enabled ? IM_COL32(242, 242, 243, 255) : IM_COL32(60, 60, 66, 255)) : IM_COL32(24, 24, 27, 255);
+        dl->AddRectFilled(a0, a1, h_fade(bg, e), 16 * s);
+        float lx = a0.x + 20 * s, ly = a0.y + 20 * s, lfs = 17 * s;
+        ImU32 lab = h_fade(grey, e), val = h_fade(ink, e);
+        auto chevron = [&](ImU32 c) {
+            float cx = a1.x - 24 * s, cy = ly + 9 * s, cs = 6 * s;
+            dl->AddLine(ImVec2(cx - cs, cy - cs), ImVec2(cx, cy), c, 2 * s);
+            dl->AddLine(ImVec2(cx, cy), ImVec2(cx - cs, cy + cs), c, 2 * s);
+        };
+        switch (i) {
+        case 0: {  // Play (Continue with a save)
+            ImU32 black = h_fade(enabled ? IM_COL32(0, 0, 0, 255) : IM_COL32(150, 150, 156, 255), e);
+            dl->AddTriangleFilled(ImVec2(lx, ly), ImVec2(lx, ly + 24 * s), ImVec2(lx + 20 * s, ly + 12 * s), black);
+            dl->AddText(fb, 28 * s, ImVec2(lx, a1.y - 20 * s - 34 * s), black, tr(last.empty() ? "Play" : "Continue"));
+            if (clicked && enabled) action = GA_PLAY;
+            break;
+        }
+        case 1: {  // Mode: Performance / Quality
+            static const char *const mn[] = {"Performance", "Quality"};
+            dl->AddText(ft, lfs, ImVec2(lx, ly), lab, tr(cur_mode < MODE_COUNT ? "Mode" : "Mode: Custom"));
+            ImVec2 s0(lx, a1.y - 20 * s - 40 * s), s1(a1.x - 20 * s, a1.y - 20 * s);
+            dl->AddRectFilled(s0, s1, h_fade(IM_COL32(12, 12, 14, 255), e), 9 * s);
+            float w = (s1.x - s0.x - 6 * s) / MODE_COUNT;
+            if (cur_mode < MODE_COUNT) {
+                pill_mode = pill_mode < 0 ? (float)cur_mode : h_approach(pill_mode, (float)cur_mode, 14);
+                float px = s0.x + 3 * s + w * pill_mode;
+                dl->AddRectFilled(ImVec2(px, s0.y + 3 * s), ImVec2(px + w, s1.y - 3 * s), h_fade(IM_COL32(46, 46, 51, 255), e), 7 * s);
+            }
+            for (int m = 0; m < MODE_COUNT; m++) {
+                const char *t = tr(mn[m]);
+                float fs = 16 * s, cx = s0.x + 3 * s + w * (m + 0.5f);
+                dl->AddText(ft, fs, ImVec2(cx - tw(ft, fs, t) * 0.5f, (s0.y + s1.y) * 0.5f - fs * 0.55f),
+                            h_fade(m == cur_mode ? ink : IM_COL32(142, 142, 150, 255), e), t);
+            }
+            if (clicked) {
+                settings_apply_mode(cur_mode == MODE_PERFORMANCE ? MODE_QUALITY : MODE_PERFORMANCE);   // (the other, each press)
+                settings_save();
+            }
+            break;
+        }
+        default: {  // Saves, Mods, Settings
+            static const char *const names[] = {"", "", "Saves", "Mods", "Settings"};
+            static const char *const subs[] = {"", "", "Back up & import", "Add & manage", "All settings"};
+            static const int acts[] = {0, 0, GA_SAVES, GA_MODS, GA_SETTINGS};
+            dl->AddText(ft, lfs, ImVec2(lx, ly), lab, tr(subs[i]));
+            dl->AddText(ft, 24 * s, ImVec2(lx, a1.y - 20 * s - 30 * s), val, tr(names[i]));
+            chevron(h_fade(IM_COL32(142, 142, 150, 255), e));
+            if (clicked) action = acts[i];
+            break;
+        }
+        }
+    }
+    // Game files (while they need setting up) and Quit; the prompt at the right
+    float by = ty0 + th + 22 * s, bh = 50 * s, bx = x0 + pad;
+    struct B { const char *lbl; int act; bool show, enabled, dot; } btns[] = {
+        {"Set up game files", GA_SETUP, !ready || busy, !busy, !ready}, {"Quit", GA_QUIT, true, true, false}};
+    for (int i = 0; i < 2; i++) {
+        if (!btns[i].show) continue;
+        float e = h_ease((float)(now - shown_at - 0.26 - i * 0.03) / 0.34f), bdy = 12 * s * (1 - e);
+        const char *lbl = tr(btns[i].lbl);
+        float bw = tw(ft, 19 * s, lbl) + (btns[i].dot ? 64 : 44) * s;
+        ImGui::SetCursorScreenPos(P(bx, by));
+        ImGui::PushID(20 + i);
+        if (i == 0 && (g_refocus == SETUP || (first && !ready))) ImGui::SetKeyboardFocusHere(), g_refocus = MAIN;
+        ImGui::BeginDisabled(!btns[i].enabled);
+        ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0, 0, 0, 0));
+        bool clicked = ImGui::InvisibleButton("##btn", ImVec2(bw, bh), ImGuiButtonFlags_EnableNav);
+        ImGui::PopStyleColor();
+        bool hot = btns[i].enabled && ((ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavCursorVisible) || ImGui::IsItemHovered());
+        ImGui::EndDisabled();
+        ImGui::PopID();
+        ImVec2 a0 = P(bx, by + bdy), a1(a0.x + bw, a0.y + bh);
+        if (hot) target = ImVec4(a0.x, a0.y, a1.x, a1.y), any_hot = true;
+        dl->AddRectFilled(a0, a1, h_fade(IM_COL32(24, 24, 27, 255), e), 12 * s);
+        dl->AddRect(a0, a1, h_fade(IM_COL32(44, 44, 49, 255), e), 12 * s, 0, 1.2f * s);
+        float lx = a0.x + 20 * s;
+        if (btns[i].dot) dl->AddCircleFilled(ImVec2(lx + 5 * s, (a0.y + a1.y) * 0.5f), 5 * s, h_fade(IM_COL32(240, 184, 90, 255), e), 16), lx += 20 * s;
+        dl->AddText(ft, 19 * s, ImVec2(lx, (a0.y + a1.y) * 0.5f - 19 * s * 0.55f),
+                    h_fade(btns[i].enabled ? ink : IM_COL32(110, 110, 118, 255), e), lbl);
+        if (clicked && btns[i].enabled) action = btns[i].act;
+        bx += bw + 12 * s;
+    }
+    {   // the prompt at the right: Cross, Select (the console's confirm button)
+        float px = x1 - pad, cy = by + bh * 0.5f, fs = 19 * s;
+        const char *l = tr("Select");
+        px -= tw(ft, fs, l);
+        dl->AddText(ft, fs, ImVec2(o.x + px, cy - fs * 0.55f), h_fade(IM_COL32(200, 200, 206, 255), k), l);
+        px -= 10 * s + 11 * s;
+        ImVec2 c(o.x + px, cy);
+        ImU32 pc = h_fade(IM_COL32(236, 242, 248, 255), k);
+        dl->AddCircle(c, 11 * s, h_fade(IM_COL32(236, 242, 248, 110), k), 32, 1.4f * s);
+        float xs = 4.5f * s;   // (a cross, drawn: the PS5's confirm)
+        dl->AddLine(ImVec2(c.x - xs, c.y - xs), ImVec2(c.x + xs, c.y + xs), pc, 1.8f * s);
+        dl->AddLine(ImVec2(c.x - xs, c.y + xs), ImVec2(c.x + xs, c.y - xs), pc, 1.8f * s);
+    }
+    // the ring: glides to the tile or button the cursor is on
+    if (any_hot) {
+        if (ring.x < 0) ring = target;
+        ring.x = h_approach(ring.x, target.x, 18), ring.y = h_approach(ring.y, target.y, 18);
+        ring.z = h_approach(ring.z, target.z, 18), ring.w = h_approach(ring.w, target.w, 18);
+        float ra = h_ease((float)(now - shown_at - 0.26) / 0.3f);
+        ImVec2 r0(ring.x - 3 * s, ring.y - 3 * s), r1(ring.z + 3 * s, ring.w + 3 * s);
+        dl->AddRect(ImVec2(r0.x - 4 * s, r0.y - 4 * s), ImVec2(r1.x + 4 * s, r1.y + 4 * s), h_fade(IM_COL32(242, 242, 243, 22), ra), 22 * s, 0, 6 * s);
+        dl->AddRect(r0, r1, h_fade(IM_COL32(242, 242, 243, 255), ra), 18 * s, 0, 2.2f * s);
+    }
+    return action;
+}
+#endif
+
 // Controllers, as in the in-game menu (runtime/ui/menu.mm): read straight from SDL, Nintendo layout - the right face
 // button (A) confirms, the bottom one (B) goes back; d-pad / left stick move. (ImGui's own SDL gamepad handling is
 // switched off: it used the Xbox layout and, per the user, didn't work on the start screen.)
@@ -2252,7 +2508,11 @@ extern "C" void launcher_run(const char *root, int mode) {
             bool typing = typed_before || ui_text_busy();
 
             if (page == MAIN) {
+#ifdef __PROSPERO__
+                int a = slick_main(ds, win, status, busy);   // (0.3.31-m4: the console menu's look, from WSword Android)
+#else
                 int a = glass_main(ds, win, status, busy);
+#endif
                 if (a == GA_PLAY) {  // first PLAY ever: how to reach the settings in game, then the game
                     if (!g_settings.menu_tip_seen) ImGui::OpenPopup("##menutip");
                     else play = true;
@@ -2271,6 +2531,23 @@ extern "C" void launcher_run(const char *root, int mode) {
             } else if (page == SETTINGS) {
                 // the in-game menu's tabs (runtime/ui/menu.mm), in a window like the in-game one; tabs that need a
                 // loaded game say so
+#ifdef __PROSPERO__  // (0.3.31-m4: the console menu's All settings, Files first and Saves last - menu.mm)
+                {
+                    extern bool menu_console_start_settings(float scale, void (*prelaunch)(float));
+                    float sc = ds.y / 1080.0f;
+                    bool back = menu_console_start_settings(sc, prelaunch_tab);
+                    int cap_dev;
+                    bind_capture_active(&cap_dev, NULL, NULL);
+                    if (back && cap_dev < 0 && !typing && !saves_tab_busy()) {
+                        bind_capture_cancel();
+                        settings_save();
+                        page = MAIN, g_refocus = SETTINGS;
+                    }
+                }
+                if (false) {
+#else
+                {
+#endif
                 float sc = ds.y / 1080.0f, w = ds.x * 0.94f, h = ds.y - 2 * 18 * sc;  // (all the height: a slim margin)
                 ImGui::GetWindowDrawList()->AddRectFilled(ImGui::GetWindowPos(), ImVec2(ImGui::GetWindowPos().x + ds.x,
                                                           ImGui::GetWindowPos().y + ds.y), IM_COL32(0, 0, 0, 110));
@@ -2301,6 +2578,7 @@ extern "C" void launcher_run(const char *root, int mode) {
                     settings_save();
                     page = MAIN, g_refocus = SETTINGS;
                 }
+                }   // (the Glass Slate window's: not on the PS5)
             } else {
                 // SETUP: the game files, in a window like Settings (option rows: runtime/ui/option_rows.h) - choose the
                 // folder with the game files, set up; once set up, delete or set up again. Each row's explanation on

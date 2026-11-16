@@ -2105,8 +2105,15 @@ static int g_cfocus_on;          // 0: Resume, 5: All settings
 static double g_help_at;         // when the foot's description last changed
 static std::string g_help_name;
 struct CCat { const char *name; int id; };
-static const CCat k_ccats[] = {{"Video", 0}, {"Colour", 10}, {"Audio", 1}, {"Controls", 8}, {"Language", 2}, {"Mods", 4}, {"Quit", 9}};
-enum { NCCATS = sizeof k_ccats / sizeof *k_ccats };
+static const CCat k_game_cats[] = {{"Video", 0}, {"Colour", 10}, {"Audio", 1}, {"Controls", 8}, {"Language", 2}, {"Mods", 4}, {"Quit", 9}};
+// (0.3.31-m4, from WSword Android: the start screen's Settings in this look - its Files page first - launcher.mm's
+// prelaunch_tab - and Saves, no Quit: menu_console_start_settings)
+static const CCat k_start_cats[] = {{"Files", -1}, {"Video", 0}, {"Colour", 10}, {"Audio", 1}, {"Controls", 8},
+                                    {"Language", 2}, {"Mods", 4}, {"Saves", 3}};
+static const CCat *k_ccats = k_game_cats;   // (the list shown: the game's, or the start screen's)
+static int NCCATS = sizeof k_game_cats / sizeof *k_game_cats;
+static void (*g_cprelaunch)(float);          // (the start screen's Files page)
+static bool g_cin_game = true;
 
 static float c_ease(float x) { x = x < 0 ? 0 : x > 1 ? 1 : x; float u = 1 - x; return 1 - u * u * u; }
 static ImU32 c_fade(ImU32 c, float a) {
@@ -2377,8 +2384,8 @@ static void c_settings(ImGuiIO &io, float s, float closing) {
     float ry = top + 92 * s, rh = 56 * s, rw = 250 * s, cfs = 26 * s;
     float bar_target = ry + g_ccat * rh;
     g_cbar = g_cbar < 0 ? bar_target : c_approach(g_cbar, bar_target, 15);
-    static float shift[NCCATS];
-    for (int i = 0; i < NCCATS; i++) {
+    static float shift[16];
+    for (int i = 0; i < NCCATS && i < 16; i++) {
         float e = c_ease((float)(now - g_view_at - 0.04 - i * 0.03) / 0.34f) * (1 - closing);
         bool open_cat = i == g_ccat;
         ImGui::SetCursorScreenPos(ImVec2(mx, ry + i * rh));
@@ -2408,8 +2415,10 @@ static void c_settings(ImGuiIO &io, float s, float closing) {
     case 1: tab_audio(); break;
     case 8: console_controls(rs); break;
     case 2: tab_language(true); break;
-    case 4: mods_tab_draw(rs, true); break;
+    case 4: mods_tab_draw(rs, g_cin_game); break;
     case 9: tab_quit(s, true); break;
+    case 3: saves_tab_draw(); break;   // (the start screen's: the game isn't running)
+    case -1: if (g_cprelaunch) g_cprelaunch(rs); break;   // (the start screen's Files: launcher.mm prelaunch_tab)
     }
     ImGui::PopID();
     ImGui::EndChild();
@@ -2429,7 +2438,71 @@ static void c_settings(ImGuiIO &io, float s, float closing) {
     dl->AddText(c_reg(), hfs, ImVec2(64 * s, fy + 14 * s + 4 * s * (1 - he)), c_fade(IM_COL32(161, 161, 168, 255), he), line.c_str(), NULL, room);
     ImGui::PopFont();
     static const CPrompt pr[] = {{-2, NULL, "Close"}, {1, NULL, "Back"}, {0, NULL, "Select"}, {-1, "L1 / R1", "Category"}};
-    c_prompts(dl, W - 64 * s, fy + foot * 0.5f, s, pr, 4, a);
+    if (g_cin_game) c_prompts(dl, W - 64 * s, fy + foot * 0.5f, s, pr, 4, a);
+    else c_prompts(dl, W - 64 * s, fy + foot * 0.5f, s, pr + 1, 3, a);   // (the start screen: no touch-pad Close)
+}
+
+// WSword's black and greys for ImGui's own widgets on the pages (lists, the bindings' table): 15 colours
+static void c_push_black(void) {
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.08f, 0.08f, 0.09f, 1));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.17f, 0.17f, 0.19f, 1));
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.17f, 0.17f, 0.19f, 1));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.22f, 0.22f, 0.24f, 1));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.26f, 0.26f, 0.28f, 1));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.11f, 0.11f, 0.12f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.17f, 0.17f, 0.19f, 1));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.22f, 0.22f, 0.24f, 1));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.11f, 0.11f, 0.12f, 1));
+    ImGui::PushStyleColor(ImGuiCol_TableHeaderBg, ImVec4(0.08f, 0.08f, 0.09f, 1));
+    ImGui::PushStyleColor(ImGuiCol_TableBorderStrong, ImVec4(0.17f, 0.17f, 0.19f, 1));
+    ImGui::PushStyleColor(ImGuiCol_TableBorderLight, ImVec4(0.12f, 0.12f, 0.13f, 1));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.95f, 0.953f, 1));
+    ImGui::PushStyleColor(ImGuiCol_TextDisabled, ImVec4(0.63f, 0.63f, 0.66f, 1));
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0.95f, 0.95f, 0.953f, 1));
+}
+
+// (0.3.31-m4, from WSword Android) The start screen's Settings in this look (launcher.mm): the categories - Files
+// first, Saves last - down the left, the rows on the right, the description and the prompts along the foot. True when
+// Circle asked to leave (not while a list, the keyboard or a question is open).
+bool menu_console_start_settings(float scale, void (*prelaunch)(float)) {
+    ImGuiIO &io = ImGui::GetIO();
+    static bool was;
+    static double last_frame = -1;
+    if (ImGui::GetTime() - last_frame > 0.25) was = false;   // (not drawn a moment ago: opened again)
+    last_frame = ImGui::GetTime();
+    const CCat *keep_cats = k_ccats;
+    int keep_n = NCCATS;
+    k_ccats = k_start_cats, NCCATS = sizeof k_start_cats / sizeof *k_start_cats;
+    g_cprelaunch = prelaunch, g_cin_game = false;
+    if (!was) {   // (opened: the page the start screen asked for - Saves, Mods - else Files)
+        was = true, g_view_at = ImGui::GetTime(), g_cbar = -1, g_quit_ask = 0;
+        int want = g_tab_request_ext >= 0 ? g_tab_request_ext : -1;
+        g_tab_request_ext = -1;
+        g_ccat = 0;
+        for (int i = 0; i < NCCATS; i++) if (k_ccats[i].id == want) g_ccat = i;
+        opt_page_replay();
+        opt_focus_first(true);
+    }
+    ImGuiStyle saved = ImGui::GetStyle();  // (the menu's widget style: the start screen has its own)
+    style_init();
+    ImGui::GetStyle().ScaleAllSizes(scale);
+    c_push_black();
+    ImFont *keep_big = g_font_big;
+    g_font_big = c_light();
+    ImGui::PushFont(c_reg());
+    opt_console_look(true, c_reg(), c_med());
+    bool any_popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId), typing = ui_text_busy();
+    c_settings(io, scale, 0);
+    bool back = !any_popup && !typing && !ui_text_busy() &&
+                (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false));
+    opt_console_look(false, NULL, NULL);
+    ImGui::PopFont();
+    g_font_big = keep_big;
+    ImGui::PopStyleColor(15);
+    ImGui::GetStyle() = saved;
+    k_ccats = keep_cats, NCCATS = keep_n, g_cin_game = true;
+    if (back) was = false;
+    return back;
 }
 
 // The console menu's frame (menu_render, while the menu is open)
@@ -2446,22 +2519,7 @@ static void console_menu(ImGuiIO &io, float scale) {
         set_open(false);
         return;
     }
-    // WSword's black and greys for ImGui's own widgets on the pages (lists, the bindings' table)
-    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.08f, 0.08f, 0.09f, 1));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.17f, 0.17f, 0.19f, 1));
-    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.17f, 0.17f, 0.19f, 1));
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.22f, 0.22f, 0.24f, 1));
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.26f, 0.26f, 0.28f, 1));
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.11f, 0.11f, 0.12f, 1));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.17f, 0.17f, 0.19f, 1));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.22f, 0.22f, 0.24f, 1));
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.11f, 0.11f, 0.12f, 1));
-    ImGui::PushStyleColor(ImGuiCol_TableHeaderBg, ImVec4(0.08f, 0.08f, 0.09f, 1));
-    ImGui::PushStyleColor(ImGuiCol_TableBorderStrong, ImVec4(0.17f, 0.17f, 0.19f, 1));
-    ImGui::PushStyleColor(ImGuiCol_TableBorderLight, ImVec4(0.12f, 0.12f, 0.13f, 1));
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.95f, 0.953f, 1));
-    ImGui::PushStyleColor(ImGuiCol_TextDisabled, ImVec4(0.63f, 0.63f, 0.66f, 1));
-    ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(0.95f, 0.95f, 0.953f, 1));
+    c_push_black();
     ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
     ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
